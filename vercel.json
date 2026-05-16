@@ -1,0 +1,6 @@
+{
+  "buildCommand": "prisma generate && react-router build",
+  "installCommand": "npm install",
+  "framework": "react-router",
+  "outputDirectory": "build"
+}
