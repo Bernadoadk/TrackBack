@@ -3,6 +3,7 @@ import { useFetcher, useLoaderData, redirect } from "react-router";
 import { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { getShopPlan } from "../lib/plan.server";
 import { Icon } from "../components/ui";
 import { REFUND_TYPES } from "../components/mock-data";
 import { sendReturnEmail } from "../lib/mailer.server";
@@ -82,6 +83,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       labelPoweredBy: "Secured by ReturnFlow",
       labelTrackingToggle: "Already shipped your return? Submit tracking",
     } as any;
+  }
+
+  const plan = shop ? await getShopPlan(shop) : 'free';
+  // Non-Pro shops always show the ReturnFlow attribution
+  if (plan !== 'pro' && settings) {
+    (settings as any).labelPoweredBy = 'Secured by ReturnFlow';
   }
 
   return { settings, shop };
@@ -337,6 +344,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       );
       if (blockedItem) {
         return { error: `"${blockedItem.name}" is not eligible for return. Please contact support for assistance.` };
+      }
+    }
+
+    // Enforce monthly plan limit
+    const PLAN_LIMITS: Record<string, number> = { free: 10, starter: 100, pro: 999999 };
+    const billing = await prisma.billingSubscription.findUnique({ where: { shop } });
+    const planLimit = PLAN_LIMITS[billing?.plan ?? 'free'] ?? 10;
+    if (planLimit < 999999) {
+      const firstDayOfMonth = new Date();
+      firstDayOfMonth.setDate(1);
+      firstDayOfMonth.setHours(0, 0, 0, 0);
+      const usedThisMonth = await prisma.returnRequest.count({
+        where: { shop, createdAt: { gte: firstDayOfMonth } }
+      });
+      if (usedThisMonth >= planLimit) {
+        return { error: `Your store has reached the ${planLimit} returns/month limit on the ${billing?.plan ?? 'free'} plan. Please upgrade to continue accepting returns.` };
       }
     }
 
@@ -599,7 +622,8 @@ export default function PortalPage() {
     <PortalShell settings={settings} shop={shop} steps={STEPS} stepperCurrent={stepperCurrent}>
       {!isSidebar && stepperEl}
 
-      <div className="bg-white rounded-2xl border border-[#e6e6ec] shadow-[0_4px_24px_rgba(15,17,23,0.06)] p-6 sm:p-8 mt-6">
+      <div key={step}
+           className="bg-white rounded-2xl border border-[#e6e6ec] shadow-[0_4px_24px_rgba(15,17,23,0.06)] p-6 sm:p-8 mt-6 animate-slideUp">
         {step === 1 && (
           <StepFindOrder orderNum={orderNum} setOrderNum={setOrderNum} email={email} setEmail={setEmail}
                          onNext={handleFindOrder} canContinue={canContinue[1]} isLoading={fetcher.state !== 'idle'}
@@ -635,6 +659,7 @@ export default function PortalPage() {
                        totalRefund={totalRefund} email={email}
                        refundType={refundType} shopSettings={settings}
                        totalSteps={STEPS.length} isLoading={fetcher.state !== 'idle'}
+                       error={(fetcher.data as any)?.error}
                        onBack={() => go(prevFrom(confirmStep))} onSubmit={handleSubmitReturn} />
         )}
       </div>
@@ -873,19 +898,33 @@ function Stepper({ steps, current, onJump }: any) {
         const isCurr = idx === current;
         return (
           <React.Fragment key={s}>
-            <button onClick={() => onJump(i)} className="flex items-center gap-2 group">
-              <div className={`w-7 h-7 rounded-full grid place-content-center text-[12px] font-semibold transition ${
-                isDone ? 'text-white' : isCurr ? 'text-white' : 'text-[#aaa]'
+            <button onClick={() => onJump(i)} className="flex items-center gap-2 group rf-press">
+              <div className={`relative w-7 h-7 rounded-full grid place-content-center text-[12px] font-semibold
+                              transition-[background-color,color,border-color,transform,box-shadow] duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${
+                isDone ? 'text-white' : isCurr ? 'text-white scale-110' : 'text-[#aaa]'
               }`} style={{
                 background: isDone ? 'var(--brand)' : isCurr ? '#0f1117' : '#fff',
-                border: isDone ? 'none' : isCurr ? 'none' : '1.5px solid #d8dce5'
+                border: isDone ? 'none' : isCurr ? 'none' : '1.5px solid #e2e5ec',
+                boxShadow: isCurr
+                  ? '0 0 0 4px color-mix(in srgb, var(--brand) 18%, transparent), 0 4px 14px -2px rgba(15,17,23,0.25)'
+                  : isDone
+                  ? '0 2px 8px -2px color-mix(in srgb, var(--brand) 40%, transparent)'
+                  : 'none',
               }}>
-                {isDone ? <Icon name="Check" size={13} strokeWidth={3} /> : idx}
+                {isDone ? <Icon name="Check" size={13} strokeWidth={3} className="animate-popIn" /> : idx}
               </div>
-              <span className={`text-[12.5px] font-medium hidden sm:inline ${isCurr ? 'text-[#0f1117]' : isDone ? 'text-[#0f1117]' : 'text-[#aaa]'}`}>{s}</span>
+              <span className={`text-[12.5px] font-medium hidden sm:inline transition-colors ${
+                isCurr ? 'text-[#0f1117]' : isDone ? 'text-[#0f1117]' : 'text-[#aaa]'
+              }`}>{s}</span>
             </button>
             {i < steps.length - 1 && (
-              <div className="flex-1 h-px" style={{ background: idx < current ? 'var(--brand)' : '#e6e6ec' }} />
+              <div className="flex-1 h-px relative overflow-hidden rounded-full" style={{ background: '#e6e6ec' }}>
+                <div className="absolute inset-y-0 left-0 transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]"
+                     style={{
+                       width: idx < current ? '100%' : '0%',
+                       background: 'linear-gradient(90deg, var(--brand), color-mix(in srgb, var(--brand) 70%, white))',
+                     }} />
+              </div>
             )}
           </React.Fragment>
         );
@@ -896,28 +935,38 @@ function Stepper({ steps, current, onJump }: any) {
 
 function PortalInput({ label, value, onChange, placeholder, type = 'text' }: any) {
   return (
-    <div>
-      <label className="block text-[12.5px] font-medium text-[#444] mb-1.5">{label}</label>
+    <div className="group">
+      <label className="block text-[12.5px] font-medium text-[#444] mb-1.5 transition-colors group-focus-within:text-[color:var(--brand)]">{label}</label>
       <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-        className="w-full h-11 px-3.5 rounded-lg border border-[#d8dce5] bg-white text-[14px] text-[#111] placeholder:text-[#aaa] focus:outline-none focus:border-[#6C63FF] focus:ring-4 focus:ring-[#6C63FF]/15 transition" />
+        className="w-full h-11 px-3.5 rounded-xl border border-[#e2e5ec] bg-white text-[14px] text-[#111] placeholder:text-[#b8bcc7]
+                   hover:border-[#c8cdd6]
+                   focus:outline-none focus:border-[color:var(--brand)]
+                   focus:ring-4 focus:ring-[color-mix(in_srgb,var(--brand)_18%,transparent)]
+                   transition-[border-color,box-shadow,background-color] duration-200" />
     </div>
   );
 }
 
 function PortalBtn({ variant = 'primary', children, full, onClick, disabled, icon, iconRight }: any) {
-  const base = 'inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg text-[13.5px] font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed';
+  const base = 'group inline-flex items-center justify-center gap-2 h-11 px-5 rounded-xl text-[13.5px] font-semibold ' +
+               'transition-[transform,box-shadow,background-color,color] duration-200 ease-out ' +
+               'disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.97]';
   const map: Record<string, string> = {
-    primary: 'text-white shadow-[0_4px_14px_rgba(108,99,255,0.3)] hover:shadow-[0_6px_20px_rgba(108,99,255,0.4)]',
-    ghost: 'text-[#666] hover:text-[#111] bg-transparent hover:bg-[#f0f0f5]',
-    outline: 'border border-[#d8dce5] bg-white text-[#111] hover:bg-[#f8fafc]',
+    primary: 'text-white shadow-[0_1px_0_rgba(255,255,255,0.25)_inset,0_8px_22px_-6px_color-mix(in_srgb,var(--brand)_55%,transparent)] ' +
+             'hover:shadow-[0_1px_0_rgba(255,255,255,0.3)_inset,0_14px_30px_-6px_color-mix(in_srgb,var(--brand)_65%,transparent)] ' +
+             'hover:-translate-y-[1px]',
+    ghost:   'text-[#555] hover:text-[#111] bg-transparent hover:bg-[#f3f4f8]',
+    outline: 'border border-[#e2e5ec] bg-white text-[#111] hover:bg-[#f8fafc] hover:border-[#c8cdd6]',
   };
-  const style = variant === 'primary' ? { background: 'var(--brand)' } : {};
+  const style = variant === 'primary'
+    ? { background: 'linear-gradient(180deg, color-mix(in srgb, var(--brand) 92%, white), var(--brand))' }
+    : {};
   return (
     <button onClick={onClick} disabled={disabled} style={style}
       className={`${base} ${map[variant]} ${full ? 'w-full' : ''}`}>
-      {icon && <Icon name={icon} size={14} />}
+      {icon && <Icon name={icon} size={14} className="transition-transform group-hover:-translate-x-[1px]" />}
       {children}
-      {iconRight && <Icon name={iconRight} size={14} />}
+      {iconRight && <Icon name={iconRight} size={14} className="transition-transform group-hover:translate-x-[2px]" />}
     </button>
   );
 }
@@ -1051,10 +1100,14 @@ function StepSelectItems({ items, orderName, date, isFulfilled, shopSettings, se
           const blocked = !!item.blocked;
           return (
             <label key={item.id}
-                   className={`flex items-center gap-4 p-4 rounded-xl border-2 transition ${
-                     blocked ? 'border-[#e6e6ec] opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                   }`}
-                   style={!blocked && sel ? { borderColor: 'var(--brand)', background: 'color-mix(in srgb, var(--brand) 4%, transparent)' } : !blocked ? { borderColor: '#e6e6ec' } : {}}>
+                   className={`flex items-center gap-4 p-4 rounded-xl border-2 transition-[border-color,background-color,transform,box-shadow] duration-200 ease-out ${
+                     blocked
+                       ? 'border-[#e6e6ec] opacity-50 cursor-not-allowed'
+                       : 'cursor-pointer hover:border-[#cfd3dc] hover:bg-[#fafbfc]'
+                   } ${!blocked && sel ? 'shadow-[0_2px_12px_-4px_color-mix(in_srgb,var(--brand)_30%,transparent)]' : ''}`}
+                   style={!blocked && sel
+                     ? { borderColor: 'var(--brand)', background: 'color-mix(in srgb, var(--brand) 5%, white)' }
+                     : !blocked ? { borderColor: '#e6e6ec' } : {}}>
               <input type="checkbox" checked={sel} onChange={() => toggleItem(item.id, blocked)} className="sr-only" disabled={blocked} />
               <div className={`w-5 h-5 rounded-md grid place-content-center shrink-0 transition`}
                    style={blocked ? { background: '#e6e6ec' } : sel ? { background: 'var(--brand)' } : { background: '#fff', border: '2px solid #d8dce5' }}>
@@ -1190,9 +1243,14 @@ function StepRefundType({ availableRefundTypes, refundType, setRefundType, excha
                     aria-checked={selected}
                     tabIndex={0}
                     onClick={() => setRefundType(key)}
-                    className="w-full text-left p-4 rounded-xl border-2 transition-all duration-150 relative group cursor-pointer focus:outline-none"
+                    className={`w-full text-left p-4 rounded-xl border-2 relative group cursor-pointer focus:outline-none
+                                transition-[border-color,background-color,transform,box-shadow] duration-200 ease-out
+                                active:scale-[0.995] hover:-translate-y-[1px]
+                                ${selected
+                                  ? 'shadow-[0_4px_16px_-4px_color-mix(in_srgb,var(--brand)_30%,transparent)]'
+                                  : 'hover:border-[#cfd3dc] hover:bg-[#fafbfc]'}`}
                     style={selected
-                      ? { borderColor: 'var(--brand)', background: 'color-mix(in srgb, var(--brand) 4%, #fff)' }
+                      ? { borderColor: 'var(--brand)', background: 'color-mix(in srgb, var(--brand) 5%, #fff)' }
                       : { borderColor: '#e6e6ec', background: '#fff' }}>
               {selected && (
                 <div className="absolute top-3 right-3 w-6 h-6 rounded-full grid place-content-center"
@@ -1260,7 +1318,7 @@ function StepRefundType({ availableRefundTypes, refundType, setRefundType, excha
   );
 }
 
-function StepConfirm({ itemsList, selectedItems, reasons, notes, totalRefund, onBack, onSubmit, refundType, shopSettings, totalSteps, isLoading }: any) {
+function StepConfirm({ itemsList, selectedItems, reasons, notes, totalRefund, onBack, onSubmit, refundType, shopSettings, totalSteps, isLoading, error }: any) {
   const meta = REFUND_TYPES[refundType] || REFUND_TYPES['ORIGINAL_PAYMENT'];
   const showBonus = refundType === 'STORE_CREDIT' && shopSettings.incentivizeStoreCredit && shopSettings.storeCreditBonusPercent > 0;
   const bonusAmount = showBonus ? totalRefund * (shopSettings.storeCreditBonusPercent / 100) : 0;
@@ -1271,6 +1329,12 @@ function StepConfirm({ itemsList, selectedItems, reasons, notes, totalRefund, on
       <div className="text-[11.5px] uppercase tracking-wider text-[#888] mb-1.5 font-semibold">Step {totalSteps} of {totalSteps}</div>
       <h2 className="text-[22px] font-bold text-[#0f1117] tracking-tight">{shopSettings?.labelConfirm || 'Review & submit'}</h2>
       <p className="text-[13.5px] text-[#666] mt-1.5">{shopSettings?.descConfirm || 'One last look before we send this.'}</p>
+
+      {error && (
+        <div className="mt-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-600 text-[13px] font-medium flex items-center gap-2">
+          <Icon name="TriangleAlert" size={14} /> {error}
+        </div>
+      )}
 
       <div className="mt-6 space-y-3">
         {itemsList.map((item: any) => (
@@ -1356,14 +1420,15 @@ function PortalConfirmation({ rma, email, refundType, settings, onReset }: any) 
         'Once received, your refund is issued within 3–5 business days.',
       ];
 
+  const accent = isExchange ? '#3B82F6' : '#22C55E';
   return (
-    <div className="text-center max-w-md mx-auto py-6">
-      <div className="w-16 h-16 rounded-full grid place-content-center mx-auto mb-4 relative"
-           style={{ background: isExchange ? '#3B82F615' : '#22C55E15' }}>
-        <div className="absolute inset-0 rounded-full animate-ping"
-             style={{ background: isExchange ? '#3B82F622' : '#22C55E22' }} />
-        <Icon name={isExchange ? 'RefreshCw' : 'Check'} size={28} strokeWidth={3}
-              style={{ color: isExchange ? '#3B82F6' : '#22C55E' }} />
+    <div className="text-center max-w-md mx-auto py-6 animate-fadeIn">
+      <div className="w-20 h-20 rounded-full grid place-content-center mx-auto mb-5 relative animate-popIn"
+           style={{ background: `${accent}15` }}>
+        <div className="absolute inset-0 rounded-full animate-ping" style={{ background: `${accent}22` }} />
+        <div className="absolute inset-[-6px] rounded-full opacity-40"
+             style={{ boxShadow: `0 0 0 6px ${accent}10, 0 0 0 14px ${accent}06` }} />
+        <Icon name={isExchange ? 'RefreshCw' : 'Check'} size={32} strokeWidth={3.5} style={{ color: accent }} className="relative" />
       </div>
       <h2 className="text-[24px] font-bold text-[#0f1117] tracking-tight">
         {isExchange ? 'Exchange request submitted!' : 'Your return is submitted'}
@@ -1374,22 +1439,37 @@ function PortalConfirmation({ rma, email, refundType, settings, onReset }: any) 
           : "We've sent the details to the store. You'll get an email shortly with next steps."}
       </p>
 
-      <div className="mt-6 p-5 rounded-xl bg-white border border-[#e6e6ec] text-left">
+      <div className="mt-6 p-5 rounded-2xl bg-white border border-[#e6e6ec] text-left
+                      shadow-[0_2px_12px_rgba(15,17,23,0.04)] animate-slideUp"
+           style={{ animationDelay: '120ms' }}>
         <div className="text-[11.5px] uppercase tracking-wider text-[#888] font-semibold">Your RMA</div>
-        <div className="text-[20px] font-bold text-[#0f1117] font-mono mt-1">{rma}</div>
-        <div className="mt-3 pt-3 border-t border-[#e6e6ec] space-y-2 text-[12.5px]">
+        <div className="flex items-center gap-2 mt-1">
+          <div className="text-[20px] font-bold text-[#0f1117] font-mono">{rma}</div>
+          <button onClick={() => navigator.clipboard?.writeText(rma)}
+                  className="ml-auto p-1.5 text-[#888] hover:text-[#0f1117] hover:bg-[#f3f4f8] rounded-md transition-colors"
+                  title="Copy RMA">
+            <Icon name="Copy" size={13} />
+          </button>
+        </div>
+        <div className="mt-3 pt-3 border-t border-[#e6e6ec] space-y-2.5 text-[12.5px] rf-stagger">
           {steps.map((step, i) => (
-            <div key={i} className="flex gap-3">
-              <div className="w-6 h-6 rounded-full grid place-content-center shrink-0 text-white text-[10px] font-bold"
-                   style={{ background: 'var(--brand)' }}>{i + 1}</div>
-              <div className="text-[#444]">{step}</div>
+            <div key={i} className="flex gap-3 items-start">
+              <div className="w-6 h-6 rounded-full grid place-content-center shrink-0 text-white text-[10px] font-bold
+                              shadow-[0_2px_8px_-2px_color-mix(in_srgb,var(--brand)_40%,transparent)]"
+                   style={{ background: 'linear-gradient(135deg, color-mix(in srgb, var(--brand) 88%, white), var(--brand))' }}>
+                {i + 1}
+              </div>
+              <div className="text-[#444] leading-relaxed">{step}</div>
             </div>
           ))}
         </div>
       </div>
 
-      <button onClick={onReset} className="mt-6 text-[13px] font-semibold" style={{ color: 'var(--brand)' }}>
+      <button onClick={onReset}
+              className="group mt-6 inline-flex items-center gap-1.5 text-[13px] font-semibold hover:gap-2 transition-all"
+              style={{ color: 'var(--brand)' }}>
         {settings?.labelStartAnother || 'Start another return'}
+        <Icon name="ArrowRight" size={13} className="transition-transform group-hover:translate-x-0.5" />
       </button>
     </div>
   );

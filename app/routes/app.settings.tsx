@@ -5,6 +5,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { PageHeader, Btn, Icon, Toggle, Input, Textarea, Select, useToast } from "../components/ui";
 import { DEFAULT_REASONS, EMAIL_TEMPLATES } from "../components/mock-data";
+import { getShopPlan, planAtLeast } from "../lib/plan.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -28,7 +29,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
   }
 
-  const emailTemplates = await prisma.emailTemplate.findMany({ where: { shop } });
+  const [emailTemplates, plan] = await Promise.all([
+    prisma.emailTemplate.findMany({ where: { shop } }),
+    getShopPlan(shop),
+  ]);
 
   // Seed default templates if not present
   const TEMPLATE_TYPES = ['Request Received', 'Approved', 'Rejected', 'Refunded'];
@@ -41,7 +45,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
   const templates = await prisma.emailTemplate.findMany({ where: { shop } });
 
-  return { settings, templates, shop, appUrl };
+  return { settings, templates, shop, appUrl, plan };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -68,6 +72,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     });
   } else if (intent === "save_reasons") {
+    const shopPlan = await getShopPlan(shop);
+    if (!planAtLeast(shopPlan, 'pro')) {
+      return { error: 'upgrade_required' };
+    }
     const reasonsStr = formData.get("reasons") as string;
     const reasons = JSON.parse(reasonsStr);
     
@@ -97,7 +105,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function SettingsPage() {
-  const { settings, templates, shop, appUrl } = useLoaderData<typeof loader>();
+  const { settings, templates, shop, appUrl, plan } = useLoaderData<typeof loader>();
   const [tab, setTab] = useState('General');
 
   const tabs = [
@@ -128,7 +136,7 @@ export default function SettingsPage() {
       </div>
 
       {tab === 'General' && <GeneralTab settings={settings} />}
-      {tab === 'Reasons' && <ReasonsTab settings={settings} />}
+      {tab === 'Reasons' && <ReasonsTab settings={settings} plan={plan} />}
       {tab === 'Emails'  && <EmailsTab templates={templates} />}
       {tab === 'Policy'  && <PolicyTab settings={settings} />}
       {tab === 'Portal'  && <PortalAccessTab shop={shop} appUrl={appUrl} />}
@@ -148,11 +156,11 @@ function SettingRow({ label, hint, children, wide }: any) {
   );
 }
 
-function SaveBar({ onSave, onDiscard, isSaving }: any) {
+function SaveBar({ onSave, onDiscard, isSaving, disabled }: any) {
   return (
     <div className="mt-6 flex items-center justify-end gap-2">
-      <Btn variant="ghost" onClick={onDiscard} disabled={isSaving}>Discard</Btn>
-      <Btn variant="primary" icon="Check" onClick={onSave} disabled={isSaving}>
+      <Btn variant="ghost" onClick={onDiscard} disabled={isSaving || disabled}>Discard</Btn>
+      <Btn variant="primary" icon="Check" onClick={onSave} disabled={isSaving || disabled}>
         {isSaving ? 'Saving...' : 'Save Changes'}
       </Btn>
     </div>
@@ -338,7 +346,8 @@ function GeneralTab({ settings }: any) {
 }
 
 // ---- Reasons tab ----
-function ReasonsTab({ settings }: any) {
+function ReasonsTab({ settings, plan }: any) {
+  const isPro = plan === 'pro';
   const submit = useSubmit();
   const navigation = useNavigation();
   const toast = useToast();
@@ -372,6 +381,21 @@ function ReasonsTab({ settings }: any) {
 
   return (
     <div className="bg-surface border border-border rounded-lg p-6">
+      {!isPro && (
+        <div className="flex items-center gap-3 p-4 mb-5 rounded-xl border border-[#8B5CF6]/30 bg-[#8B5CF6]/8">
+          <Icon name="Lock" size={15} style={{ color: '#8B5CF6' }} className="shrink-0" />
+          <p className="text-[12.5px] text-ink flex-1">
+            <span className="font-semibold">Custom return reasons require the Pro plan.</span>
+            {" "}Upgrade to add, remove, and customize return reasons.
+          </p>
+          <a href="/app/billing"
+            className="shrink-0 h-7 px-3 rounded-md text-[12px] font-semibold text-white flex items-center gap-1"
+            style={{ background: '#8B5CF6' }}>
+            Upgrade <Icon name="ArrowRight" size={12} />
+          </a>
+        </div>
+      )}
+
       <div className="flex items-start justify-between mb-4 flex-wrap gap-3">
         <div>
           <div className="text-[14px] font-semibold text-ink">Return reasons</div>
@@ -384,8 +408,8 @@ function ReasonsTab({ settings }: any) {
           <div key={r.id} className="flex items-center gap-3 py-2.5 px-3 rounded-md bg-bg/30 border border-divider group">
             <Icon name="GripVertical" size={14} className="text-faint cursor-grab" />
             <div className={`flex-1 text-[13.5px] ${r.enabled ? 'text-ink' : 'text-faint line-through'}`}>{r.label}</div>
-            <Toggle checked={r.enabled} onChange={() => toggle(r.id)} />
-            <button onClick={() => del(r.id)} className="p-1.5 rounded text-faint hover:text-danger hover:bg-danger/10 transition opacity-0 group-hover:opacity-100">
+            <Toggle checked={r.enabled} onChange={() => isPro && toggle(r.id)} disabled={!isPro} />
+            <button onClick={() => isPro && del(r.id)} disabled={!isPro} className="p-1.5 rounded text-faint hover:text-danger hover:bg-danger/10 transition opacity-0 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30">
               <Icon name="Trash2" size={14} />
             </button>
           </div>
@@ -393,13 +417,14 @@ function ReasonsTab({ settings }: any) {
       </div>
 
       <div className="mt-5 pt-5 border-t border-divider flex items-center gap-2">
-        <Input value={newLabel} onChange={(e: any) => setNewLabel(e.target.value)}
-               onKeyDown={(e: any) => e.key === 'Enter' && addReason()}
-               placeholder="e.g. Item not as pictured" className="flex-1" />
-        <Btn variant="secondary" icon="Plus" onClick={addReason} disabled={!newLabel.trim()}>Add Custom Reason</Btn>
+        <Input value={newLabel} onChange={(e: any) => isPro && setNewLabel(e.target.value)}
+               onKeyDown={(e: any) => e.key === 'Enter' && isPro && addReason()}
+               placeholder={isPro ? "e.g. Item not as pictured" : "Pro plan required"} className="flex-1"
+               disabled={!isPro} />
+        <Btn variant="secondary" icon="Plus" onClick={addReason} disabled={!newLabel.trim() || !isPro}>Add Custom Reason</Btn>
       </div>
 
-      <div className="pt-6 border-t border-divider mt-6"><SaveBar onSave={handleSave} onDiscard={() => setReasons(settings.reasons.map((r: any, idx: number) => ({ id: idx, label: r.label, enabled: r.enabled })))} isSaving={isSaving} /></div>
+      <div className="pt-6 border-t border-divider mt-6"><SaveBar onSave={handleSave} onDiscard={() => setReasons(settings.reasons.map((r: any, idx: number) => ({ id: idx, label: r.label, enabled: r.enabled })))} isSaving={isSaving} disabled={!isPro} /></div>
     </div>
   );
 }

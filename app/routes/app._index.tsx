@@ -21,20 +21,32 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 function KpiCard({ label, value, sub, subTone, icon, accentColor }: any) {
   return (
-    <div className="bg-surface border border-border rounded-lg p-5 relative overflow-hidden group hover:border-[#3a3e58] transition-colors">
-      <div className="flex items-start justify-between">
-        <div className="text-[12px] font-medium text-muted">{label}</div>
-        <div className="w-8 h-8 rounded-md grid place-content-center"
-             style={{ background: accentColor + '18', color: accentColor }}>
-          <Icon name={icon} size={15} strokeWidth={2.25} />
+    <div className="bg-surface border border-border rounded-xl p-5 relative overflow-hidden group rf-lift rf-hairline hover:border-[#3a3e58]">
+      {/* Animated gradient ring on hover */}
+      <div className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none"
+           style={{
+             background: `radial-gradient(120px 80px at 100% 0%, ${accentColor}1A, transparent 70%)`,
+           }} />
+
+      <div className="flex items-start justify-between relative">
+        <div className="text-[12px] font-medium text-muted uppercase tracking-wider">{label}</div>
+        <div className="w-9 h-9 rounded-lg grid place-content-center transition-transform duration-300 ease-spring group-hover:scale-110 group-hover:-rotate-3"
+             style={{
+               background: `linear-gradient(135deg, ${accentColor}28, ${accentColor}10)`,
+               color: accentColor,
+               boxShadow: `inset 0 1px 0 ${accentColor}1F, 0 2px 8px -2px ${accentColor}25`,
+             }}>
+          <Icon name={icon} size={16} strokeWidth={2.25} />
         </div>
       </div>
-      <div className="mt-3 text-[26px] font-semibold text-ink tracking-tight tabular-nums">{value}</div>
-      <div className="mt-1.5 flex items-center gap-1.5 text-[11.5px]">
-        <span style={{ color: subTone === 'ok' ? '#22C55E' : subTone === 'warn' ? '#F59E0B' : '#8B8FA8' }}>{sub}</span>
+      <div className="mt-3 text-[28px] font-semibold text-ink tracking-tight tabular-nums leading-none">{value}</div>
+      <div className="mt-2 flex items-center gap-1.5 text-[11.5px]">
+        <span className="font-medium" style={{ color: subTone === 'ok' ? '#22C55E' : subTone === 'warn' ? '#F59E0B' : '#8B8FA8' }}>{sub}</span>
       </div>
-      <div className="absolute -right-6 -bottom-6 w-28 h-28 rounded-full opacity-[0.04] pointer-events-none"
-           style={{ background: accentColor }} />
+
+      {/* Decorative orb */}
+      <div className="absolute -right-8 -bottom-8 w-32 h-32 rounded-full opacity-[0.06] pointer-events-none transition-all duration-500 ease-smooth group-hover:opacity-[0.12] group-hover:scale-110"
+           style={{ background: `radial-gradient(circle, ${accentColor} 0%, transparent 70%)` }} />
     </div>
   );
 }
@@ -108,7 +120,7 @@ export default function DashboardPage() {
         subtitle={today} />
 
       {/* KPI Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 rf-stagger">
         <KpiCard label="Pending Review"      value={pendingCount}     sub="Requires action"   subTone="warn"  icon="Clock"        accentColor="#F59E0B" />
         <KpiCard label="In Transit"          value={shippedCount}     sub="Awaiting receipt"  subTone="ok"    icon="Truck"        accentColor="#10B981" />
         <KpiCard label="Refunded This Month" value={`$${refundedThisMonth.toFixed(2)}`} sub="Total value" subTone="ok" icon="DollarSign" accentColor="#22C55E" />
@@ -117,27 +129,32 @@ export default function DashboardPage() {
 
       {/* Action items (AfterShip-style to-do) */}
       {actionItems.length > 0 && (
-        <div className="bg-surface border border-border rounded-lg p-5">
+        <div className="bg-surface border border-border rounded-xl p-5 rf-hairline animate-slideUp">
           <div className="flex items-center gap-2 mb-4">
-            <div className="w-6 h-6 rounded-md grid place-content-center" style={{ background: '#F59E0B18', color: '#F59E0B' }}>
-              <Icon name="ListChecks" size={13} />
+            <div className="w-7 h-7 rounded-md grid place-content-center shadow-[inset_0_1px_0_rgba(245,158,11,0.2)]"
+                 style={{ background: 'linear-gradient(135deg,#F59E0B28,#F59E0B10)', color: '#F59E0B' }}>
+              <Icon name="ListChecks" size={14} />
             </div>
-            <span className="text-[13px] font-semibold text-ink">Action items</span>
-            <span className="ml-auto text-[11.5px] px-2 py-0.5 rounded-full font-semibold"
+            <span className="text-[13px] font-semibold text-ink tracking-tight">Action items</span>
+            <span className="ml-auto text-[11.5px] px-2 py-0.5 rounded-full font-semibold ring-1 ring-inset ring-warn/20"
                   style={{ background: 'rgba(245,158,11,0.12)', color: '#F59E0B' }}>
               {actionItems.length}
             </span>
           </div>
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             {actionItems.map((item, i) => (
               <Link key={i} to={`${item.link}${location.search ? location.search : ''}`}
-                    className="flex items-center gap-3 p-3 rounded-lg hover:bg-white/[0.04] transition-colors group">
-                <div className="w-7 h-7 rounded-md grid place-content-center shrink-0"
-                     style={{ background: item.color + '18', color: item.color }}>
+                    className="flex items-center gap-3 p-3 rounded-lg hover:bg-white/[0.05] transition-all duration-200 ease-smooth group hover:translate-x-[2px]">
+                <div className="w-8 h-8 rounded-lg grid place-content-center shrink-0 transition-transform duration-200 group-hover:scale-110"
+                     style={{
+                       background: `linear-gradient(135deg, ${item.color}28, ${item.color}10)`,
+                       color: item.color,
+                       boxShadow: `inset 0 1px 0 ${item.color}1F`,
+                     }}>
                   <Icon name={item.icon} size={14} />
                 </div>
                 <span className="text-[13px] text-muted group-hover:text-ink transition-colors flex-1">{item.label}</span>
-                <Icon name="ArrowRight" size={13} className="text-faint group-hover:text-muted transition-colors" />
+                <Icon name="ArrowRight" size={13} className="text-faint group-hover:text-accent2 group-hover:translate-x-1 transition-all duration-200" />
               </Link>
             ))}
           </div>
@@ -175,8 +192,8 @@ export default function DashboardPage() {
                     <td colSpan={8} className="py-8 text-center text-muted">No returns yet.</td>
                   </tr>
                 ) : recent.map((r: any) => (
-                  <tr key={r.rma} 
-                      className="border-t border-divider hover:bg-white/[0.02] transition-colors relative group">
+                  <tr key={r.rma}
+                      className="border-t border-divider hover:bg-white/[0.025] transition-colors relative group">
                     <td className="py-3 px-5 font-mono text-[12px] text-ink">{r.rma}</td>
                     <td className="py-3 text-muted">{r.order}</td>
                     <td className="py-3 text-ink">{r.customer}</td>
@@ -186,8 +203,9 @@ export default function DashboardPage() {
                     <td className="py-3"><StatusBadge status={r.status} /></td>
                     <td className="py-3 px-5 text-right relative z-10">
                       <Link to={`/app/returns/${r.rma}${location.search}`}
-                              className="text-[12px] font-medium px-2.5 py-1 rounded border border-border text-ink hover:bg-white/5 hover:border-[#3a3e58] transition">
+                              className="inline-flex items-center gap-1 text-[12px] font-medium px-2.5 py-1 rounded-md border border-border text-ink hover:bg-white/[0.06] hover:border-accent/40 hover:text-accent2 transition-all duration-150 rf-press">
                         {r.status === 'PENDING' ? 'Review' : 'View'}
+                        <Icon name="ArrowRight" size={11} className="opacity-0 group-hover:opacity-100 -ml-1 group-hover:ml-0 transition-all duration-200" />
                       </Link>
                     </td>
                     <td className="absolute inset-0 z-0 hidden group-hover:block cursor-pointer">
@@ -237,22 +255,30 @@ export default function DashboardPage() {
         </Card>
 
         {/* Portal access card */}
-        <Card title="Customer Portal" subtitle="Your public return storefront" className="lg:col-span-3">
-          <div className="flex flex-col h-full">
-            <div className="text-[13px] text-muted mb-4">
+        <Card title="Customer Portal" subtitle="Your public return storefront" className="lg:col-span-3 relative overflow-hidden">
+          {/* decorative aura */}
+          <div className="absolute -top-12 -right-12 w-48 h-48 rounded-full opacity-[0.07] pointer-events-none"
+               style={{ background: 'radial-gradient(circle, #6C63FF, transparent 70%)' }} />
+          <div className="flex flex-col h-full relative">
+            <div className="text-[13px] text-muted mb-4 leading-relaxed">
               Share this link on your store's navigation or footer so customers can file returns.
             </div>
-            <div className="flex items-center gap-2 p-3 rounded-md bg-bg border border-border mb-4 group">
-              <code className="text-[12px] text-accent2 flex-1 truncate">https://{shop}/apps/returns</code>
+            <div className="flex items-center gap-2 p-3 rounded-lg bg-bg border border-border mb-4 group hover:border-[#3a3e58] transition-colors">
+              <Icon name="Link" size={14} className="text-faint shrink-0" />
+              <code className="text-[12px] text-accent2 flex-1 truncate font-mono">https://{shop}/apps/returns</code>
               <button onClick={() => navigator.clipboard.writeText(`https://${shop}/apps/returns`)}
-                      className="p-1.5 text-faint hover:text-ink transition opacity-0 group-hover:opacity-100">
+                      className="p-1.5 text-faint hover:text-ink hover:bg-white/5 rounded transition-all rf-press"
+                      title="Copy URL">
                 <Icon name="Copy" size={14} />
               </button>
             </div>
             <div className="mt-auto">
               <a href={`https://${shop}/apps/returns`} target="_blank" rel="noreferrer"
-                 className="inline-flex items-center justify-center gap-2 px-4 h-9 rounded-md bg-accent text-white text-[13px] font-semibold hover:bg-accent/90 transition shadow-lg shadow-accent/20">
-                <Icon name="ExternalLink" size={14} />
+                 className="group inline-flex items-center justify-center gap-2 px-4 h-10 rounded-md text-white text-[13px] font-semibold transition-all rf-press
+                            bg-gradient-to-b from-[#7B73FF] to-[#6259EE] hover:from-[#8B85FF] hover:to-[#6C63FF]
+                            shadow-[0_1px_0_rgba(255,255,255,0.2)_inset,0_8px_22px_-6px_rgba(108,99,255,0.55)]
+                            hover:shadow-[0_1px_0_rgba(255,255,255,0.25)_inset,0_12px_28px_-6px_rgba(108,99,255,0.65)]">
+                <Icon name="ExternalLink" size={14} className="transition-transform group-hover:rotate-12" />
                 Open Portal
               </a>
             </div>

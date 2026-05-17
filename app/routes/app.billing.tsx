@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import { useLoaderData, useFetcher } from "react-router";
 import { authenticate } from "../shopify.server";
@@ -20,13 +21,49 @@ const PLANS = [
 ];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
   const shop = session.shop;
 
   // Get or create billing record
   let billing = await prisma.billingSubscription.findUnique({ where: { shop } });
   if (!billing) {
     billing = await prisma.billingSubscription.create({ data: { shop, plan: 'free', status: 'active' } });
+  }
+
+  // When Shopify redirects back after approval, charge_id is in the URL.
+  // Verify the charge status and activate if confirmed.
+  const url = new URL(request.url);
+  const chargeId = url.searchParams.get("charge_id");
+  if (chargeId && billing.status === 'pending') {
+    try {
+      const gid = `gid://shopify/AppSubscription/${chargeId}`;
+      const resp = await admin.graphql(
+        `#graphql
+        query CheckSubscription($id: ID!) {
+          node(id: $id) {
+            ... on AppSubscription { id status }
+          }
+        }`,
+        { variables: { id: gid } }
+      );
+      const { data } = await resp.json();
+      const status: string = data?.node?.status ?? '';
+      if (status === 'ACTIVE') {
+        billing = await prisma.billingSubscription.update({
+          where: { shop },
+          data: {
+            status: 'active',
+            shopifyChargeId: chargeId,
+            trialEndsAt: new Date(Date.now() + 14 * 86400000),
+          },
+        });
+      } else if (status === 'DECLINED' || status === 'EXPIRED') {
+        billing = await prisma.billingSubscription.update({
+          where: { shop },
+          data: { plan: 'free', status: 'active', shopifyChargeId: null },
+        });
+      }
+    } catch (_) { /* ignore — stale URL or dev env */ }
   }
 
   // Count this month's returns
@@ -41,7 +78,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const currentPlan = PLANS.find(p => p.id === billing!.plan) || PLANS[0];
   const limit = currentPlan.monthlyLimit;
 
-  return { billing, usedThisMonth, limit, currentPlan };
+  const activated = !!(chargeId && billing.status === 'active');
+  return { billing, usedThisMonth, limit, currentPlan, activated };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -59,7 +97,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       // Create Shopify recurring charge
       const { confirmationUrl, appSubscription } = await shopifyBilling.request({
         plan: plan.name as any,
-        isTest: true, // Set to false in production
+        isTest: process.env.NODE_ENV !== 'production',
         trialDays: 14,
         amount: plan.price,
         currencyCode: "USD",
@@ -96,9 +134,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function BillingPage() {
-  const { billing, usedThisMonth, limit, currentPlan } = useLoaderData<typeof loader>();
+  const { billing, usedThisMonth, limit, currentPlan, activated } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const toast = useToast();
+
+  // Show success toast when coming back from Shopify billing approval
+  const shownActivated = useRef(false);
+  useEffect(() => {
+    if (activated && !shownActivated.current) {
+      shownActivated.current = true;
+      toast({ kind: 'success', title: `${currentPlan.name} plan activated!`, body: 'Your 14-day free trial has started.' });
+    }
+  }, [activated]);
 
   const pct = limit > 1000 ? 0 : Math.min((usedThisMonth / limit) * 100, 100);
   const isNearLimit = pct >= 80;

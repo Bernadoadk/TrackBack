@@ -4,6 +4,7 @@ import { useLoaderData } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { PageHeader, Card } from "../components/ui";
+import { getShopPlan } from "../lib/plan.server";
 
 const ANALYTICS_COLORS = ['#6C63FF','#EF4444','#F59E0B','#3B82F6','#8B5CF6'];
 
@@ -58,24 +59,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
 
-  const returnRequests = await prisma.returnRequest.findMany({
-    where: { shop },
-    include: { items: true },
-    orderBy: { createdAt: 'desc' }
-  });
+  const [returnRequests, plan] = await Promise.all([
+    prisma.returnRequest.findMany({ where: { shop }, include: { items: true }, orderBy: { createdAt: 'desc' } }),
+    getShopPlan(shop),
+  ]);
+
+  const isStarter = plan === 'starter' || plan === 'pro';
 
   return {
+    plan,
     p7:  computePeriod(returnRequests, 7),
-    p30: computePeriod(returnRequests, 30),
-    p90: computePeriod(returnRequests, 90),
+    p30: isStarter ? computePeriod(returnRequests, 30) : null,
+    p90: isStarter ? computePeriod(returnRequests, 90) : null,
   };
 };
 
 export default function AnalyticsPage() {
-  const { p7, p30, p90 } = useLoaderData<typeof loader>();
-  const [period, setPeriod] = useState('30 days');
+  const { p7, p30, p90, plan } = useLoaderData<typeof loader>();
+  const isStarter = plan === 'starter' || plan === 'pro';
+  const [period, setPeriod] = useState(isStarter ? '30 days' : '7 days');
 
-  const pd = period === '7 days' ? p7 : period === '90 days' ? p90 : p30;
+  const pd = period === '7 days' ? p7 : period === '90 days' ? (p90 ?? p7) : (p30 ?? p7);
   const { total, totalRefunded, retainedRevenue, retainedRatio, avgProcessingDays, exchangeRate, chart, topReasons, topProducts } = pd;
 
   const data = chart;
@@ -107,14 +111,36 @@ export default function AnalyticsPage() {
         subtitle="Spot patterns and reduce return rates."
         right={
           <div className="inline-flex items-center bg-surface border border-border rounded-md p-0.5">
-            {['7 days', '30 days', '90 days'].map(p => (
-              <button key={p} onClick={() => setPeriod(p)}
-                className={`px-3 h-7 text-[12px] font-medium rounded transition-colors ${
-                  period === p ? 'bg-accent/15 text-accent2' : 'text-muted hover:text-ink'
-                }`}>{p}</button>
-            ))}
+            {['7 days', '30 days', '90 days'].map(p => {
+              const locked = !isStarter && p !== '7 days';
+              return (
+                <button key={p}
+                  onClick={() => !locked && setPeriod(p)}
+                  title={locked ? 'Requires Starter plan' : undefined}
+                  className={`px-3 h-7 text-[12px] font-medium rounded transition-colors flex items-center gap-1 ${
+                    period === p ? 'bg-accent/15 text-accent2' : locked ? 'text-faint cursor-not-allowed' : 'text-muted hover:text-ink'
+                  }`}>
+                  {locked && <span>🔒</span>}
+                  {p}
+                </button>
+              );
+            })}
           </div>
         } />
+
+      {!isStarter && (
+        <div className="flex items-center gap-3 p-4 rounded-xl border border-[#F59E0B]/30 bg-[#F59E0B]/8">
+          <span className="text-[12.5px] text-ink flex-1">
+            <span className="font-semibold">You're seeing the last 7 days only.</span>
+            {" "}Upgrade to Starter for 30 & 90-day analytics.
+          </span>
+          <a href="/app/billing"
+            className="shrink-0 h-7 px-3 rounded-md text-[12px] font-semibold text-white flex items-center gap-1"
+            style={{ background: '#F59E0B' }}>
+            Upgrade
+          </a>
+        </div>
+      )}
 
       {/* KPI row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

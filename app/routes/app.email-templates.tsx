@@ -3,6 +3,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import { useLoaderData, useSubmit, useNavigation, useActionData } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { getShopPlan, planAtLeast } from "../lib/plan.server";
 import {
   PageHeader, Icon, ColorPicker, CloudinaryLogoUploader, useToast
 } from "../components/ui";
@@ -73,10 +74,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   }
 
-  const templates = await prisma.emailTemplate.findMany({ where: { shop } });
+  const [templates, plan] = await Promise.all([
+    prisma.emailTemplate.findMany({ where: { shop } }),
+    getShopPlan(shop),
+  ]);
 
   return {
     shop,
+    plan,
     logoUrl:    settings.logoUrl ?? "",
     brandColor: settings.emailBrandColor,
     fromEmail:  settings.fromEmail,
@@ -89,6 +94,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
+  const plan = await getShopPlan(shop);
+  if (!planAtLeast(plan, 'starter')) {
+    return { error: 'upgrade_required' };
+  }
   const fd = await request.formData();
   const intent = fd.get("intent") as string;
 
@@ -138,8 +147,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function EmailTemplatesPage() {
-  const { logoUrl: initLogo, brandColor: initColor, fromEmail, templates, shop } =
+  const { logoUrl: initLogo, brandColor: initColor, fromEmail, templates, shop, plan } =
     useLoaderData<typeof loader>();
+  const isStarter = plan === 'starter' || plan === 'pro';
 
   const submit     = useSubmit();
   const navigation = useNavigation();
@@ -203,6 +213,21 @@ export default function EmailTemplatesPage() {
         subtitle="Customize the emails sent to customers at each stage of the return process."
       />
 
+      {!isStarter && (
+        <div className="flex items-center gap-3 p-4 mb-6 rounded-xl border border-[#F59E0B]/30 bg-[#F59E0B]/8">
+          <Icon name="Lock" size={15} style={{ color: '#F59E0B' }} className="shrink-0" />
+          <p className="text-[12.5px] text-ink flex-1">
+            <span className="font-semibold">Email Templates require the Starter plan.</span>
+            {" "}Upgrade to customize email content and branding.
+          </p>
+          <a href="/app/billing"
+            className="shrink-0 h-7 px-3 rounded-md text-[12px] font-semibold text-white flex items-center gap-1"
+            style={{ background: '#F59E0B' }}>
+            Upgrade <Icon name="ArrowRight" size={12} />
+          </a>
+        </div>
+      )}
+
       {/* ── Branding bar ── */}
       <div className="mb-6 p-5 rounded-xl border border-border bg-surface">
         <div className="flex items-center gap-2 mb-4">
@@ -233,7 +258,7 @@ export default function EmailTemplatesPage() {
             />
             <button
               onClick={saveBranding}
-              disabled={brandColor === initColor || isSaving}
+              disabled={brandColor === initColor || isSaving || !isStarter}
               className="mt-4 h-8 px-4 rounded-lg text-[12.5px] font-semibold text-white flex items-center gap-1.5 transition disabled:opacity-40"
               style={{ background: "#6C63FF" }}
             >
@@ -282,7 +307,7 @@ export default function EmailTemplatesPage() {
             </div>
             <button
               onClick={saveTemplate}
-              disabled={isSaving}
+              disabled={isSaving || !isStarter}
               className="h-8 px-4 rounded-lg text-[12.5px] font-semibold text-white flex items-center gap-1.5 transition disabled:opacity-40"
               style={{ background: "#6C63FF" }}
             >

@@ -4,6 +4,7 @@ import { useLoaderData, useSubmit, useNavigation, useActionData } from "react-ro
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { uploadToCloudinary, deleteFromCloudinary, isCloudinaryUrl } from "../lib/cloudinary.server";
+import { getShopPlan, planAtLeast } from "../lib/plan.server";
 import { Icon, useToast, ColorPicker, CloudinaryLogoUploader } from "../components/ui";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -40,11 +41,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
 
-  let s = await prisma.shopSettings.findUnique({ where: { shop } });
-  if (!s) s = await prisma.shopSettings.create({ data: { shop } });
+  const [s, plan] = await Promise.all([
+    prisma.shopSettings.findUnique({ where: { shop } }).then(r => r ?? prisma.shopSettings.create({ data: { shop } })),
+    getShopPlan(shop),
+  ]);
 
   return {
     shop,
+    plan,
     initial: {
       portalLayout:        s.portalLayout,
       brandColor:          s.brandColor,
@@ -78,6 +82,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
+  const plan = await getShopPlan(shop);
+  if (!planAtLeast(plan, 'starter')) {
+    return { error: 'upgrade_required' };
+  }
   const fd = await request.formData();
   const intent = fd.get("intent") as string | null;
 
@@ -136,7 +144,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function PortalEditorPage() {
-  const { initial, shop } = useLoaderData<typeof loader>();
+  const { initial, shop, plan } = useLoaderData<typeof loader>();
+  const isStarter = plan === 'starter' || plan === 'pro';
+  const isPro = plan === 'pro';
   const submit        = useSubmit();
   const navigation    = useNavigation();
   const actionData    = useActionData<typeof action>();
@@ -213,14 +223,14 @@ export default function PortalEditorPage() {
           )}
           <button
             onClick={() => setS(initial)}
-            disabled={!isDirty || isSaving}
+            disabled={!isDirty || isSaving || !isStarter}
             className="h-8 px-3 rounded-md text-[12.5px] font-medium border border-border bg-surface hover:bg-bg transition disabled:opacity-40"
           >
             Discard
           </button>
           <button
             onClick={doSave}
-            disabled={!isDirty || isSaving}
+            disabled={!isDirty || isSaving || !isStarter}
             className="h-8 px-4 rounded-md text-[12.5px] font-semibold text-white transition disabled:opacity-40 flex items-center gap-1.5"
             style={{ background: "#6C63FF" }}
           >
@@ -231,11 +241,30 @@ export default function PortalEditorPage() {
         </div>
       </div>
 
+      {/* ── Upgrade banner for Free plan ── */}
+      {!isStarter && (
+        <div className="flex items-center gap-3 px-6 py-3 border-b border-[#F59E0B]/30 bg-[#F59E0B]/8 shrink-0">
+          <Icon name="Lock" size={15} style={{ color: '#F59E0B' }} className="shrink-0" />
+          <p className="text-[12.5px] text-ink flex-1">
+            <span className="font-semibold">Portal Editor requires the Starter plan.</span>
+            {" "}Upgrade to customize branding, colors, logo and portal texts.
+          </p>
+          <a href="/app/billing"
+            className="shrink-0 h-7 px-3 rounded-md text-[12px] font-semibold text-white flex items-center gap-1"
+            style={{ background: '#F59E0B' }}>
+            Upgrade <Icon name="ArrowRight" size={12} />
+          </a>
+        </div>
+      )}
+
       {/* ── Split pane ── */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
 
         {/* Left — controls */}
-        <div className="w-[320px] shrink-0 border-r border-border flex flex-col overflow-y-auto bg-surface">
+        <div className={`w-[320px] shrink-0 border-r border-border flex flex-col overflow-y-auto bg-surface relative ${!isStarter ? 'pointer-events-none select-none' : ''}`}>
+          {!isStarter && (
+            <div className="absolute inset-0 z-10 bg-surface/60 backdrop-blur-[1px]" />
+          )}
           <div className="px-4 py-2.5 border-b border-divider">
             <span className="text-[10px] uppercase tracking-[0.08em] text-faint font-semibold">Controls</span>
           </div>
@@ -292,7 +321,7 @@ export default function PortalEditorPage() {
 
           {/* Texts */}
           <AccordionSection title="Texts" icon="Type" open={openSection === "texts"} onToggle={() => toggle("texts")}>
-            <TextsSection s={s} set={set} />
+            <TextsSection s={s} set={set} isPro={isPro} />
           </AccordionSection>
         </div>
 
@@ -524,7 +553,7 @@ const DESC_PLACEHOLDERS: Record<string,string> = {
   descConfirm:     "One last look before we send this.",
 };
 
-function TextsSection({ s, set }: { s: EditorSettings; set: SetFn }) {
+function TextsSection({ s, set, isPro }: { s: EditorSettings; set: SetFn; isPro: boolean }) {
   const [tab, setTab]           = useState<"steps" | "general">("steps");
   const [editStep, setEditStep] = useState(1);
 
@@ -622,13 +651,18 @@ function TextsSection({ s, set }: { s: EditorSettings; set: SetFn }) {
             placeholder="Already shipped your return? Submit tracking"
             onChange={v => set("labelTrackingToggle", v)}
           />
-          <LabelField
-            label="Powered-by text"
-            hint="Footer attribution"
-            value={s.labelPoweredBy}
-            placeholder="Secured by ReturnFlow"
-            onChange={v => set("labelPoweredBy", v)}
-          />
+          <div className={`relative ${!isPro ? 'opacity-50' : ''}`}>
+            <LabelField
+              label="Powered-by text"
+              hint={isPro ? "Leave empty to hide (white-label)" : "Pro plan required to customize or hide"}
+              value={isPro ? s.labelPoweredBy : "Secured by ReturnFlow"}
+              placeholder="Secured by ReturnFlow"
+              onChange={v => isPro && set("labelPoweredBy", v)}
+            />
+            {!isPro && (
+              <div className="absolute inset-0 cursor-not-allowed" title="Pro plan required" />
+            )}
+          </div>
         </div>
       )}
     </div>
