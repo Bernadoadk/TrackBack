@@ -547,6 +547,10 @@ function PortalAccessTab({ shop, appUrl }: { shop: string; appUrl: string }) {
   const directUrl  = `${appUrl}/portal?shop=${shop}`;
   const iframeCode = `<iframe\n  src="${directUrl}"\n  width="100%"\n  height="700"\n  frameborder="0"\n  style="border:none;border-radius:12px;"\n></iframe>`;
 
+  const EXTENSION_UID    = "e8b27fcc-79e9-97be-bb6e-f4b9ff6f32de1c30314c";
+  const EXTENSION_HANDLE = "returnflow-return-button";
+  const themeEditorUrl   = `https://${shop}/admin/themes/current/editor?addAppBlockId=${EXTENSION_UID}/${EXTENSION_HANDLE}&target=newAppsSection`;
+
   const copy = (key: string, text: string) => {
     navigator.clipboard.writeText(text).then(() => {
       setCopied(key);
@@ -556,6 +560,45 @@ function PortalAccessTab({ shop, appUrl }: { shop: string; appUrl: string }) {
 
   return (
     <div className="space-y-6">
+      {/* Theme block setup — required for App Store compliance (5.1.3) */}
+      <div className="bg-surface border border-border rounded-lg p-6">
+        <div className="flex items-start gap-3 mb-5">
+          <div className="w-9 h-9 rounded-md grid place-content-center shrink-0" style={{ background: 'rgba(34,197,94,0.15)', color: '#22C55E' }}>
+            <Icon name="Blocks" size={16} />
+          </div>
+          <div>
+            <div className="text-[14px] font-semibold text-ink">Add return button to your theme</div>
+            <div className="text-[12.5px] text-muted mt-0.5 leading-relaxed max-w-lg">
+              Use the <strong className="text-ink">ReturnFlow — Return Button</strong> theme block to add a branded
+              "Start a Return" button directly on any page in your Online Store (e.g. footer, order status page).
+            </div>
+          </div>
+        </div>
+
+        <ol className="space-y-2 mb-5 text-[12.5px] text-muted list-none">
+          {[
+            'Click "Open Theme Editor" below — the block will be pre-selected.',
+            'In the editor, choose a section where you want the button to appear (e.g. Footer group).',
+            'Click "Save" in the top-right corner of the theme editor.',
+          ].map((step, i) => (
+            <li key={i} className="flex items-start gap-2.5">
+              <span className="w-5 h-5 rounded-full text-[11px] font-bold grid place-content-center shrink-0 mt-0.5"
+                    style={{ background: 'rgba(34,197,94,0.15)', color: '#22C55E' }}>
+                {i + 1}
+              </span>
+              <span>{step}</span>
+            </li>
+          ))}
+        </ol>
+
+        <a href={themeEditorUrl} target="_blank" rel="noreferrer"
+           className="inline-flex items-center gap-2 h-9 px-4 rounded-md text-[13px] font-semibold border transition"
+           style={{ background: 'rgba(34,197,94,0.12)', color: '#22C55E', borderColor: 'rgba(34,197,94,0.25)' }}>
+          <Icon name="ExternalLink" size={14} />
+          Open Theme Editor
+        </a>
+      </div>
+
       {/* Page URLs section */}
       <div className="bg-surface border border-border rounded-lg p-6">
         <div className="flex items-start gap-3 mb-5">

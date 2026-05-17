@@ -173,41 +173,79 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
     } else if (refundMethod === 'STORE_CREDIT') {
       try {
-        const discountCode = `CREDIT-${rmaId}`;
-        const createDiscountRes = await admin.graphql(`#graphql
-          mutation discountCodeBasicCreate($basicCodeDiscount: DiscountCodeBasicInput!) {
-            discountCodeBasicCreate(basicCodeDiscount: $basicCodeDiscount) {
-              codeDiscountNode {
-                codeDiscount {
-                  ... on DiscountCodeBasic {
-                    codes(first: 1) { edges { node { code } } }
-                  }
+        const orderRes = await admin.graphql(`#graphql
+          query GetOrderTransactions($id: ID!) {
+            order(id: $id) {
+              transactions {
+                id
+                kind
+                status
+                amountSet { shopMoney { amount currencyCode } }
+                gateway
+              }
+              lineItems(first: 50) {
+                edges { node { id variant { id } quantity } }
+              }
+            }
+          }`, { variables: { id: rr.orderId } });
+        const orderData = await orderRes.json();
+        const order = orderData.data?.order;
+
+        if (!order) {
+          return { error: "Order not found in Shopify. Please verify the order ID." };
+        }
+
+        const saleTx = order.transactions?.find(
+          (t: any) => (t.kind === 'SALE' || t.kind === 'CAPTURE') && t.status === 'SUCCESS'
+        );
+        if (!saleTx) {
+          return { error: "No successful payment transaction found on this order. The store credit cannot be processed automatically." };
+        }
+
+        const shopifyLineItems: any[] = order.lineItems?.edges?.map((e: any) => e.node) || [];
+        const refundLineItems = rr.items
+          .map((it: any) => {
+            const shopifyItem = it.lineItemId
+              ? shopifyLineItems.find((li: any) => li.id === it.lineItemId)
+              : shopifyLineItems.find((li: any) => li.variant?.id === it.variantId);
+            if (!shopifyItem) return null;
+            return { lineItemId: shopifyItem.id, quantity: it.quantity, restockType: "RETURN" };
+          })
+          .filter(Boolean);
+
+        const refundInput: any = {
+          orderId: rr.orderId,
+          ...(refundLineItems.length > 0 && { refundLineItems }),
+          transactions: [{
+            parentId: saleTx.id,
+            amount: refundAmount.toFixed(2),
+            kind: "REFUND",
+            gateway: "gift_card"
+          }],
+          notify: true
+        };
+        const refundRes = await admin.graphql(`#graphql
+          mutation RefundCreate($input: RefundInput!) {
+            refundCreate(input: $input) {
+              refund {
+                id
+                transactions {
+                  id
+                  gateway
+                  giftCard { id lastCharacters }
                 }
               }
               userErrors { field message }
             }
-          }`,
-          {
-            variables: {
-              basicCodeDiscount: {
-                title: "Store Credit " + rmaId,
-                code: discountCode,
-                customerSelection: { all: true },
-                customerGets: {
-                  value: { discountAmount: { amount: String(refundAmount.toFixed(2)), appliesOnEachItem: false } },
-                  items: { all: true }
-                },
-                startsAt: new Date().toISOString()
-              }
-            }
-          }
-        );
-        const discountData = await createDiscountRes.json();
-        const userErrors = discountData.data?.discountCodeBasicCreate?.userErrors || [];
+          }`, { variables: { input: refundInput } });
+        const refundData = await refundRes.json();
+        const userErrors = refundData.data?.refundCreate?.userErrors || [];
         if (userErrors.length > 0) {
-          return { error: `Failed to create store credit code: ${userErrors.map((e: any) => e.message).join(', ')}` };
+          return { error: `Failed to issue store credit: ${userErrors.map((e: any) => e.message).join(', ')}` };
         }
-        storeCreditCode = discountData.data?.discountCodeBasicCreate?.codeDiscountNode?.codeDiscount?.codes?.edges?.[0]?.node?.code || discountCode;
+        const giftCardLastChars = refundData.data?.refundCreate?.refund?.transactions
+          ?.find((t: any) => t.gateway === 'gift_card')?.giftCard?.lastCharacters;
+        storeCreditCode = giftCardLastChars ? `**** ${giftCardLastChars}` : 'Shopify Gift Card';
       } catch (e: any) {
         return { error: `Failed to create store credit: ${e?.message || 'unknown error'}` };
       }
@@ -793,7 +831,7 @@ export default function ReturnDetailPage() {
                 <div className="p-3 rounded-md text-[12.5px] flex gap-2 items-start"
                      style={{ background: 'rgba(108,99,255,0.10)', color: '#8B85FF' }}>
                   <Icon name="Info" size={14} className="mt-0.5 shrink-0" />
-                  <div className="leading-relaxed">A discount code will be created in Shopify and sent to the customer by email.</div>
+                  <div className="leading-relaxed">A Shopify gift card will be issued to the customer via <code>refundCreate</code> and sent by email.</div>
                 </div>
               )}
               {refundMethod === 'EXCHANGE' && (
