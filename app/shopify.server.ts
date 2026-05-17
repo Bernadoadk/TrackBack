@@ -23,16 +23,26 @@ const shopify = shopifyApp({
   },
   billing: {
     "Starter": {
-      amount: 19.0,
-      currencyCode: "USD",
-      interval: BillingInterval.Every30Days,
+      trialDays: 14,
       replacementBehavior: BillingReplacementBehavior.ApplyImmediately,
+      lineItems: [
+        {
+          amount: 19.0,
+          currencyCode: "USD",
+          interval: BillingInterval.Every30Days,
+        },
+      ],
     },
     "Pro": {
-      amount: 49.0,
-      currencyCode: "USD",
-      interval: BillingInterval.Every30Days,
+      trialDays: 14,
       replacementBehavior: BillingReplacementBehavior.ApplyImmediately,
+      lineItems: [
+        {
+          amount: 49.0,
+          currencyCode: "USD",
+          interval: BillingInterval.Every30Days,
+        },
+      ],
     },
   } as any,
   ...(process.env.SHOP_CUSTOM_DOMAIN

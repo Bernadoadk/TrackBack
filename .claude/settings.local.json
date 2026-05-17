@@ -10,7 +10,8 @@
       "Bash(findstr /V \"next major\")",
       "Bash(npm run *)",
       "Bash(npx shopify *)",
-      "Bash(findstr \"application_url\")"
+      "Bash(findstr \"application_url\")",
+      "Read(//c/Users/Bernado ADIKPETO/Desktop/Victim_projects/quote-flow/**)"
     ]
   }
 }

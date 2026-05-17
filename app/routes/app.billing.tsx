@@ -4,6 +4,7 @@ import { useLoaderData, useFetcher } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { PageHeader, Card, Btn, Icon, useToast } from "../components/ui";
+import { isBillingTestMode } from "../lib/plan.server";
 
 const PLANS = [
   { id: 'free',    name: 'Free',    price: 0,  unit: 'forever', monthlyLimit: 10,
@@ -88,50 +89,131 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
   const planId = formData.get("planId") as string;
   const intent = formData.get("intent") as string;
+  const testMode = isBillingTestMode();
 
-  if (intent === "upgrade" && planId !== 'free') {
-    const plan = PLANS.find(p => p.id === planId);
+  if (intent === "upgrade" && planId !== "free") {
+    const plan = PLANS.find((p) => p.id === planId);
     if (!plan) return { error: "Plan not found" };
 
+    console.log(`[billing] upgrade → ${plan.name} | BILLING_MODE=${process.env.BILLING_MODE ?? "(unset)"} | isTest=${testMode}`);
+
+    // Already subscribed to this plan?
     try {
-      // Create Shopify recurring charge
-      const { confirmationUrl, appSubscription } = await shopifyBilling.request({
+      const { hasActivePayment } = await shopifyBilling.check({
+        plans: [plan.name],
+        isTest: testMode,
+      });
+      if (hasActivePayment) {
+        await prisma.billingSubscription.upsert({
+          where: { shop },
+          create: { shop, plan: planId, status: "active" },
+          update: { plan: planId, status: "active" },
+        });
+        return { success: true, plan: planId, alreadyActive: true };
+      }
+    } catch (e) {
+      console.error("[billing] billing.check failed (continuing):", e);
+    }
+
+    // Request subscription. In React Router 7 with embedded auth, billing.request()
+    // throws a Response (302/401) that contains the Shopify confirmation URL in headers.
+    try {
+      const response = (await shopifyBilling.request({
         plan: plan.name as any,
-        isTest: process.env.NODE_ENV !== 'production',
-        trialDays: 14,
-        amount: plan.price,
-        currencyCode: "USD",
-      });
+        isTest: testMode,
+        // returnUrl defaults to the appUrl; Shopify redirects back with ?charge_id=...
+      })) as any;
 
-      // Save pending subscription
-      await prisma.billingSubscription.upsert({
-        where: { shop },
-        create: { shop, plan: planId, status: 'pending', shopifyChargeId: (appSubscription as any).id },
-        update: { plan: planId, status: 'pending', shopifyChargeId: (appSubscription as any).id }
-      });
-
-      return { confirmationUrl };
-    } catch (e: any) {
-      // Fallback for when billing API is not configured in dev
-      await prisma.billingSubscription.upsert({
-        where: { shop },
-        create: { shop, plan: planId, status: 'active', trialEndsAt: new Date(Date.now() + 14 * 86400000) },
-        update: { plan: planId, status: 'active', trialEndsAt: new Date(Date.now() + 14 * 86400000) }
-      });
-      return { success: true, plan: planId };
+      // Some SDK versions return a Response instead of throwing — handle both
+      if (response instanceof Response) {
+        const url = extractConfirmationUrl(response);
+        if (url) {
+          await prisma.billingSubscription.upsert({
+            where: { shop },
+            create: { shop, plan: planId, status: "pending" },
+            update: { plan: planId, status: "pending" },
+          });
+          return { confirmationUrl: url };
+        }
+      }
+      // Legacy shape: { confirmationUrl, appSubscription }
+      if (response?.confirmationUrl) {
+        await prisma.billingSubscription.upsert({
+          where: { shop },
+          create: { shop, plan: planId, status: "pending", shopifyChargeId: response.appSubscription?.id },
+          update: { plan: planId, status: "pending", shopifyChargeId: response.appSubscription?.id },
+        });
+        return { confirmationUrl: response.confirmationUrl };
+      }
+      return { error: "Could not start subscription — no confirmation URL returned." };
+    } catch (error) {
+      if (error instanceof Response) {
+        const url = await extractConfirmationUrlAsync(error);
+        if (url) {
+          await prisma.billingSubscription.upsert({
+            where: { shop },
+            create: { shop, plan: planId, status: "pending" },
+            update: { plan: planId, status: "pending" },
+          });
+          return { confirmationUrl: url };
+        }
+      }
+      console.error("[billing] subscription request failed:", error);
+      return { error: "Could not start subscription. Please try again." };
     }
   }
 
   if (intent === "cancel") {
+    try {
+      // Look up the active subscription on Shopify side, then cancel it.
+      const allPaidPlans = PLANS.filter((p) => p.id !== "free").map((p) => p.name);
+      const billingCheck = await shopifyBilling.check({
+        plans: allPaidPlans as any,
+        isTest: testMode,
+      });
+      const subscription = (billingCheck as any).appSubscriptions?.[0];
+      if (subscription) {
+        await shopifyBilling.cancel({
+          subscriptionId: subscription.id,
+          isTest: testMode,
+          prorate: true,
+        });
+      }
+    } catch (e) {
+      console.error("[billing] cancel failed (continuing to local downgrade):", e);
+    }
+
     await prisma.billingSubscription.update({
       where: { shop },
-      data: { plan: 'free', status: 'active', shopifyChargeId: null }
+      data: { plan: "free", status: "active", shopifyChargeId: null },
     });
     return { success: true, cancelled: true };
   }
 
   return null;
 };
+
+// Pull a confirmation URL out of various places Shopify can put it.
+function extractConfirmationUrl(response: Response): string | null {
+  return (
+    response.headers.get("Location") ||
+    response.headers.get("X-Shopify-API-Request-Failure-Reauthorize-Url") ||
+    null
+  );
+}
+
+async function extractConfirmationUrlAsync(response: Response): Promise<string | null> {
+  const fromHeaders = extractConfirmationUrl(response);
+  if (fromHeaders) return fromHeaders;
+  try {
+    const body = await response.text();
+    const m = body.match(/https:\/\/[^\s"'<>]+confirm[^\s"'<>]*/);
+    if (m) return m[0];
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
 
 export default function BillingPage() {
   const { billing, usedThisMonth, limit, currentPlan, activated } = useLoaderData<typeof loader>();
@@ -158,17 +240,37 @@ export default function BillingPage() {
     fetcher.submit(fd, { method: "POST" });
   };
 
-  // Handle redirect to Shopify billing confirmation
-  if (fetcher.data && (fetcher.data as any).confirmationUrl) {
-    window.top!.location.href = (fetcher.data as any).confirmationUrl;
-  }
+  // Redirect to Shopify billing confirmation page (opens at the top of the iframe)
+  const redirectedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const data = fetcher.data as any;
+    if (!data?.confirmationUrl) return;
+    if (redirectedRef.current === data.confirmationUrl) return;
+    redirectedRef.current = data.confirmationUrl;
+    // `_top` busts out of the embedded iframe so the merchant lands on the
+    // Shopify billing confirmation page.
+    open(data.confirmationUrl, "_top");
+  }, [fetcher.data]);
 
-  if (fetcher.data && (fetcher.data as any).success && !(fetcher.data as any).cancelled) {
-    toast({ kind: 'success', title: '14-day free trial activated!', body: 'Enjoy all features of your new plan.' });
-  }
-  if (fetcher.data && (fetcher.data as any).cancelled) {
-    toast({ kind: 'info', title: 'Downgraded to Free plan' });
-  }
+  const toastedSuccessRef = useRef(false);
+  useEffect(() => {
+    const data = fetcher.data as any;
+    if (!data) return;
+    if (data.success && !data.cancelled && !toastedSuccessRef.current) {
+      toastedSuccessRef.current = true;
+      toast({
+        kind: 'success',
+        title: data.alreadyActive ? 'Subscription already active' : 'Plan activated!',
+        body: data.alreadyActive ? "You're already subscribed to this plan." : 'Enjoy all features of your new plan.',
+      });
+    }
+    if (data.cancelled) {
+      toast({ kind: 'info', title: 'Downgraded to Free plan' });
+    }
+    if (data.error) {
+      toast({ kind: 'error', title: 'Billing error', body: data.error });
+    }
+  }, [fetcher.data, toast]);
 
   return (
     <div>
