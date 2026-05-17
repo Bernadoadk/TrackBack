@@ -231,6 +231,7 @@ const PLAN_LEVEL: Record<string, number> = { free: 0, starter: 1, pro: 2 };
 export const NAV = [
   { key: 'dashboard',        path: '/app',                  label: 'Dashboard',        icon: 'LayoutDashboard' },
   { key: 'returns',          path: '/app/returns',          label: 'Returns',          icon: 'Package', badge: 'pending' },
+  { key: 'messages',         path: '/app/messages',         label: 'Messages',         icon: 'MessageCircle', badge: 'unread' },
   { key: 'analytics',        path: '/app/analytics',        label: 'Analytics',        icon: 'ChartLine' },
   { key: 'portal-editor',    path: '/app/portal-editor',    label: 'Portal Editor',    icon: 'Paintbrush',   requiredPlan: 'starter' },
   { key: 'email-templates',  path: '/app/email-templates',  label: 'Email Templates',  icon: 'Mail',         requiredPlan: 'starter' },
@@ -238,7 +239,7 @@ export const NAV = [
   { key: 'billing',          path: '/app/billing',          label: 'Billing',          icon: 'CreditCard' },
 ];
 
-export function Sidebar({ pendingCount, shop, shopName, planName, usedThisMonth, planLimit }: any) {
+export function Sidebar({ pendingCount, unreadCount = 0, shop, shopName, planName, usedThisMonth, planLimit }: any) {
   const location = useLocation();
   const currentPath = location.pathname;
 
@@ -248,21 +249,13 @@ export function Sidebar({ pendingCount, shop, shopName, planName, usedThisMonth,
       <div className="pointer-events-none absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-accent/30 to-transparent" />
 
       {/* Logo */}
-      <div className="px-5 h-16 flex items-center gap-2.5 border-b border-divider">
-        <div className="relative w-8 h-8 rounded-lg grid place-content-center text-white group cursor-pointer"
-             style={{
-               background: 'linear-gradient(135deg, #6C63FF 0%, #8B5CF6 100%)',
-               boxShadow: '0 6px 20px -4px rgba(108,99,255,0.55), inset 0 1px 0 rgba(255,255,255,0.25)',
-             }}>
-          <Icon name="RefreshCcw" size={15} strokeWidth={2.5} className="transition-transform duration-500 ease-smooth group-hover:rotate-180" />
-          {/* idle aura */}
-          <span className="absolute inset-0 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                style={{ boxShadow: '0 0 24px 4px rgba(108,99,255,0.35)' }} />
-        </div>
-        <div>
-          <div className="text-[15px] font-semibold text-ink leading-tight tracking-tight">ReturnFlow</div>
-          <div className="text-[10px] text-muted leading-tight">Shopify · v1.4</div>
-        </div>
+      <div className="px-4 h-20 flex items-center justify-center border-b border-divider">
+        <img
+          src="/returnflow_logo.png"
+          alt="ReturnFlow"
+          className="h-12 w-auto object-contain select-none"
+          draggable={false}
+        />
       </div>
 
       {/* Nav */}
@@ -289,6 +282,12 @@ export function Sidebar({ pendingCount, shop, shopName, planName, usedThisMonth,
               {item.badge === 'pending' && pendingCount > 0 && (
                 <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md ring-1 ring-inset ring-warn/20"
                       style={{ background: 'rgba(245,158,11,0.16)', color: '#F59E0B' }}>{pendingCount}</span>
+              )}
+              {item.badge === 'unread' && unreadCount > 0 && (
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md ring-1 ring-inset"
+                      style={{ background: 'rgba(239,68,68,0.18)', color: '#EF4444', boxShadow: '0 0 0 1px rgba(239,68,68,0.2) inset' }}>
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
               )}
               {isLocked && (
                 <Icon name="Lock" size={11} className="text-faint shrink-0" />

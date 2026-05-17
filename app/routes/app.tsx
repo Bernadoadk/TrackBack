@@ -7,6 +7,8 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { Sidebar, ToastProvider, Icon } from "../components/ui";
 import { useEffect, useState } from "react";
+import SupportChatWidget from "../components/SupportChatWidget";
+import ThemeToggle from "../components/ThemeToggle";
 
 declare global {
   namespace JSX {
@@ -21,13 +23,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
   const shop = session.shop;
 
-  const [pendingCount, shopData, billing] = await Promise.all([
+  const [pendingCount, shopData, billing, unreadAgg] = await Promise.all([
     prisma.returnRequest.count({ where: { shop, status: 'PENDING' } }),
     admin.graphql(`#graphql
       query { shop { name } }
     `).then(r => r.json()).catch(() => ({ data: { shop: { name: null } } })),
     prisma.billingSubscription.findUnique({ where: { shop } }),
+    prisma.conversation.aggregate({
+      where: { shop, type: 'CLIENT' },
+      _sum: { unreadByMerchant: true },
+    }),
   ]);
+  const unreadCount = unreadAgg._sum.unreadByMerchant ?? 0;
 
   const shopName: string = shopData?.data?.shop?.name ?? shop.replace('.myshopify.com', '');
 
@@ -42,11 +49,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const planName: string = billing?.plan ?? 'free';
   const planLimit: number = PLAN_LIMITS[planName] ?? 10;
 
-  return { apiKey: process.env.SHOPIFY_API_KEY || "", pendingCount, shop, shopName, planName, usedThisMonth, planLimit };
+  return { apiKey: process.env.SHOPIFY_API_KEY || "", pendingCount, unreadCount, shop, shopName, planName, usedThisMonth, planLimit };
 };
 
 export default function App() {
-  const { apiKey, pendingCount, shop, shopName, planName, usedThisMonth, planLimit } = useLoaderData<typeof loader>();
+  const { apiKey, pendingCount, unreadCount, shop, shopName, planName, usedThisMonth, planLimit } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isLoading = navigation.state === "loading" || navigation.state === "submitting";
 
@@ -74,8 +81,13 @@ export default function App() {
                  }} />
           </div>
         </div>
+        {/* Theme toggle — top-right corner */}
+        <div className="fixed top-3 right-3 md:top-4 md:right-4 z-[9990]">
+          <ThemeToggle />
+        </div>
+
         <div className="min-h-screen flex text-ink relative">
-          <Sidebar pendingCount={pendingCount} shop={shop} shopName={shopName} planName={planName} usedThisMonth={usedThisMonth} planLimit={planLimit} />
+          <Sidebar pendingCount={pendingCount} unreadCount={unreadCount} shop={shop} shopName={shopName} planName={planName} usedThisMonth={usedThisMonth} planLimit={planLimit} />
           <main className="flex-1 min-w-0 bg-bg h-screen overflow-y-auto relative">
             {/* Soft ambient gradient behind content */}
             <div className="pointer-events-none absolute top-0 left-0 right-0 h-[400px]"
@@ -97,6 +109,7 @@ export default function App() {
             </div>
           </main>
         </div>
+        <SupportChatWidget />
       </ToastProvider>
     </AppProvider>
   );

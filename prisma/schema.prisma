@@ -72,6 +72,9 @@ model ShopSettings {
   labelStartAnother       String   @default("Start another return")
   labelPoweredBy          String   @default("Secured by ReturnFlow")
   labelTrackingToggle     String   @default("Already shipped your return? Submit tracking")
+
+  // Live chat
+  liveChatEnabled         Boolean  @default(true)
   
   // Custom reasons
   reasons                 ReturnReason[]
@@ -174,6 +177,52 @@ model EmailTemplate {
   
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// ---------- Live chat ----------
+enum ConversationType {
+  CLIENT
+  SUPPORT
+}
+
+enum ChatSenderType {
+  CLIENT
+  MERCHANT
+  SUPPORT
+}
+
+model Conversation {
+  id               String   @id @default(cuid())
+  shop             String
+  type             ConversationType
+  // For CLIENT conversations
+  customerEmail    String?
+  customerName     String?
+  // For SUPPORT conversations the "customer" is the merchant themselves
+  unreadByMerchant Int      @default(0)
+  unreadByCustomer Int      @default(0)
+  lastMessageAt    DateTime @default(now())
+  lastMessagePreview String? @default("")
+  closed           Boolean  @default(false)
+  messages         ChatMessage[]
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([shop, type, customerEmail])
+  @@index([shop, lastMessageAt])
+}
+
+model ChatMessage {
+  id             String         @id @default(cuid())
+  conversationId String
+  conversation   Conversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderType     ChatSenderType
+  senderName     String?
+  body           String
+  readAt         DateTime?
+  createdAt      DateTime       @default(now())
+
+  @@index([conversationId, createdAt])
 }
 
 // Abonnement Shopify Billing

@@ -7,8 +7,10 @@ import { getShopPlan } from "../lib/plan.server";
 import { Icon } from "../components/ui";
 import { REFUND_TYPES } from "../components/mock-data";
 import { sendReturnEmail } from "../lib/mailer.server";
+import ChatWidget from "../components/ChatWidget";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
+  // (chat gating happens after plan is resolved below)
   const reqUrl = new URL(request.url);
 
   // When Shopify's app proxy serves the request, it appends a `signature` param.
@@ -82,6 +84,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       labelStartAnother: "Start another return",
       labelPoweredBy: "Secured by ReturnFlow",
       labelTrackingToggle: "Already shipped your return? Submit tracking",
+      liveChatEnabled: true,
     } as any;
   }
 
@@ -89,6 +92,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Non-Pro shops always show the ReturnFlow attribution
   if (plan !== 'pro' && settings) {
     (settings as any).labelPoweredBy = 'Secured by ReturnFlow';
+  }
+  // Live chat with customers is a Pro feature — force-disable for lower plans
+  if (plan !== 'pro' && settings) {
+    (settings as any).liveChatEnabled = false;
   }
 
   return { settings, shop };
@@ -561,13 +568,28 @@ export default function PortalPage() {
     return current - 1;
   };
 
+  const chatPrefillEmail = (orderData?.email || email || '').toLowerCase();
+  const chatPrefillName  = orderData?.customerName || '';
+  const chatEnabled      = (settings as any)?.liveChatEnabled !== false;
+
   if (submittedRma) {
     return (
-      <PortalShell settings={settings} shop={shop} steps={[]} stepperCurrent={0}>
-        <PortalConfirmation rma={submittedRma} email={email} refundType={refundType} settings={settings} onReset={() => {
-          setSubmittedRma(null); setStep(1); setOrderNum(''); setEmail(''); setOrderData(null); setSelectedItems({}); setReasons({}); setNotes({}); setRefundType('ORIGINAL_PAYMENT');
-        }} />
-      </PortalShell>
+      <>
+        <PortalShell settings={settings} shop={shop} steps={[]} stepperCurrent={0}>
+          <PortalConfirmation rma={submittedRma} email={email} refundType={refundType} settings={settings} onReset={() => {
+            setSubmittedRma(null); setStep(1); setOrderNum(''); setEmail(''); setOrderData(null); setSelectedItems({}); setReasons({}); setNotes({}); setRefundType('ORIGINAL_PAYMENT');
+          }} />
+        </PortalShell>
+        {chatEnabled && (
+          <ChatWidget
+            shop={shop}
+            brandColor={settings?.brandColor || '#6C63FF'}
+            storeName={settings?.portalStoreName || shop.split('.')[0]}
+            prefillEmail={chatPrefillEmail || undefined}
+            prefillName={chatPrefillName || undefined}
+          />
+        )}
+      </>
     );
   }
 
@@ -619,6 +641,7 @@ export default function PortalPage() {
   );
 
   return (
+    <>
     <PortalShell settings={settings} shop={shop} steps={STEPS} stepperCurrent={stepperCurrent}>
       {!isSidebar && stepperEl}
 
@@ -671,6 +694,16 @@ export default function PortalPage() {
         </div>
       </div>
     </PortalShell>
+    {chatEnabled && (
+      <ChatWidget
+        shop={shop}
+        brandColor={settings?.brandColor || '#6C63FF'}
+        storeName={settings?.portalStoreName || shop.split('.')[0]}
+        prefillEmail={chatPrefillEmail || undefined}
+        prefillName={chatPrefillName || undefined}
+      />
+    )}
+    </>
   );
 }
 

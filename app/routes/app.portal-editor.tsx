@@ -5,7 +5,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { uploadToCloudinary, deleteFromCloudinary, isCloudinaryUrl } from "../lib/cloudinary.server";
 import { getShopPlan, planAtLeast } from "../lib/plan.server";
-import { Icon, useToast, ColorPicker, CloudinaryLogoUploader } from "../components/ui";
+import { Icon, useToast, ColorPicker, CloudinaryLogoUploader, Toggle } from "../components/ui";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -33,6 +33,7 @@ type EditorSettings = {
   labelStartAnother:   string;
   labelPoweredBy:      string;
   labelTrackingToggle: string;
+  liveChatEnabled:     boolean;
 };
 
 // ─── Loader ──────────────────────────────────────────────────────────────────
@@ -73,6 +74,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       labelStartAnother:   s.labelStartAnother,
       labelPoweredBy:      s.labelPoweredBy,
       labelTrackingToggle: s.labelTrackingToggle,
+      liveChatEnabled:     (s as any).liveChatEnabled ?? true,
     } satisfies EditorSettings,
   };
 };
@@ -135,7 +137,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       labelStartAnother:   fd.get("labelStartAnother")  as string,
       labelPoweredBy:      fd.get("labelPoweredBy")      as string,
       labelTrackingToggle: fd.get("labelTrackingToggle") as string,
-    },
+      liveChatEnabled:     fd.get("liveChatEnabled") === "true",
+    } as any,
   });
 
   return { success: true };
@@ -317,6 +320,42 @@ export default function PortalEditorPage() {
               placeholder={`support@${shop.split(".")[0]}.com`}
               onChange={v => set("footerContact", v)}
             />
+          </AccordionSection>
+
+          {/* Live chat */}
+          <AccordionSection
+            title="Live chat"
+            icon="MessageCircle"
+            open={openSection === "livechat"}
+            onToggle={() => toggle("livechat")}
+            badge={!isPro ? "Pro" : undefined}
+          >
+            <div className={`relative ${!isPro ? 'opacity-60' : ''}`}>
+              <Toggle
+                checked={isPro && s.liveChatEnabled}
+                onChange={(v: boolean) => isPro && set("liveChatEnabled", v)}
+                label="Enable live chat on portal"
+                description={isPro
+                  ? "Show a floating chat button so customers can message you directly from the return portal."
+                  : "Show a floating chat button so customers can message you directly from the return portal. Pro plan required."}
+              />
+              {!isPro && (
+                <div className="absolute inset-0 cursor-not-allowed" title="Pro plan required" />
+              )}
+            </div>
+            {!isPro && (
+              <div className="mt-3 flex items-center justify-between gap-3 p-3 rounded-md border border-divider bg-bg/40">
+                <div className="flex items-center gap-2 text-[12.5px] text-muted">
+                  <Icon name="Lock" size={13} className="text-faint" />
+                  Live chat with customers is a Pro feature.
+                </div>
+                <a href="/app/billing"
+                   className="inline-flex items-center gap-1 px-2.5 h-7 rounded-md text-[12px] font-semibold text-white"
+                   style={{ background: 'linear-gradient(90deg,#6C63FF,#8B5CF6)' }}>
+                  Upgrade <Icon name="ArrowRight" size={12} />
+                </a>
+              </div>
+            )}
           </AccordionSection>
 
           {/* Texts */}
@@ -672,9 +711,9 @@ function TextsSection({ s, set, isPro }: { s: EditorSettings; set: SetFn; isPro:
 // ─── Accordion section ────────────────────────────────────────────────────────
 
 function AccordionSection({
-  title, icon, open, onToggle, children,
+  title, icon, open, onToggle, children, badge,
 }: {
-  title: string; icon: string; open: boolean; onToggle: () => void; children: React.ReactNode;
+  title: string; icon: string; open: boolean; onToggle: () => void; children: React.ReactNode; badge?: string;
 }) {
   return (
     <div className="border-b border-divider">
@@ -685,6 +724,12 @@ function AccordionSection({
         <div className="flex items-center gap-2.5">
           <Icon name={icon} size={14} className="text-muted" />
           <span className="text-[13px] font-semibold text-ink">{title}</span>
+          {badge && (
+            <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ring-1 ring-inset"
+                  style={{ background: 'rgba(108,99,255,0.14)', color: '#8B85FF', borderColor: 'rgba(108,99,255,0.25)' }}>
+              {badge}
+            </span>
+          )}
         </div>
         <Icon name={open ? "ChevronUp" : "ChevronDown"} size={13} className="text-faint" />
       </button>

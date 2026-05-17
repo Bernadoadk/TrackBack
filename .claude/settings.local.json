@@ -2,7 +2,13 @@
   "permissions": {
     "allow": [
       "Bash(npx tsc *)",
-      "Bash(npx react-router *)"
+      "Bash(npx react-router *)",
+      "Bash(findstr /N \"export \" \"app\\\\components\\\\ui.tsx\")",
+      "Bash(findstr /R \"function const\")",
+      "Bash(npx prisma *)",
+      "Bash(findstr /V \"shamefully\")",
+      "Bash(findstr /V \"next major\")",
+      "Bash(npm run *)"
     ]
   }
 }

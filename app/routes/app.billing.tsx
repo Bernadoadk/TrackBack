@@ -16,7 +16,7 @@ const PLANS = [
   },
   { id: 'pro',     name: 'Pro',     price: 49, unit: 'month',   monthlyLimit: 999999,
     summary: 'Unlimited returns',
-    features: ['Everything in Starter', 'API access & webhooks', 'Custom return reasons', 'White-label portal', 'Dedicated CSM'],
+    features: ['Everything in Starter', 'Live chat with customers', 'API access & webhooks', 'Custom return reasons', 'White-label portal', 'Dedicated CSM'],
   },
 ];
 

@@ -106,7 +106,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function SettingsPage() {
   const { settings, templates, shop, appUrl, plan } = useLoaderData<typeof loader>();
-  const [tab, setTab] = useState('General');
 
   const tabs = [
     { key: 'General', icon: 'Settings2' },
@@ -115,6 +114,18 @@ export default function SettingsPage() {
     { key: 'Policy',  icon: 'FileText' },
     { key: 'Portal',  icon: 'Globe' },
   ];
+
+  // Support deep-link via ?tab=Portal (or any other tab key)
+  const initialTab = (() => {
+    if (typeof window === 'undefined') return 'General';
+    const t = new URL(window.location.href).searchParams.get('tab');
+    return tabs.some(x => x.key === t) ? (t as string) : 'General';
+  })();
+  const [tab, setTab] = useState(initialTab);
+  useEffect(() => {
+    const t = new URL(window.location.href).searchParams.get('tab');
+    if (t && tabs.some(x => x.key === t)) setTab(t);
+  }, []);
 
   return (
     <div>

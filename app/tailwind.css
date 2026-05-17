@@ -2,20 +2,57 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ───────── Theme tokens (RGB triplets — used by Tailwind via rgb(var(--c-x) / <alpha>)) ───────── */
+:root,
+:root[data-theme="dark"] {
+  --c-bg:       15  17  23;   /* #0F1117 */
+  --c-surface:  26  29  39;   /* #1A1D27 */
+  --c-elevated: 34  37  54;   /* #222536 */
+  --c-border:   46  49  72;   /* #2E3148 */
+  --c-divider:  38  42  58;   /* #262A3A */
+  --c-ink:      240 240 245;  /* #F0F0F5 */
+  --c-muted:    139 143 168;  /* #8B8FA8 */
+  --c-faint:    91  95  117;  /* #5B5F75 */
+  --c-accent:   108 99  255;  /* #6C63FF */
+  --c-accent2:  139 133 255;  /* #8B85FF */
+  --c-scroll-thumb: 46 49 72;
+  --c-scroll-thumb-hover: 68 72 95;
+  --c-selection: 108 99 255;
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --c-bg:       245 247 250;  /* #F5F7FA */
+  --c-surface:  255 255 255;  /* #FFFFFF */
+  --c-elevated: 249 250 251;  /* #F9FAFB */
+  --c-border:   226 232 240;  /* #E2E8F0 */
+  --c-divider:  237 240 246;  /* #EDF0F6 */
+  --c-ink:      15  23  42;   /* #0F172A */
+  --c-muted:    100 116 139;  /* #64748B */
+  --c-faint:    148 163 184;  /* #94A3B8 */
+  --c-accent:   108 99  255;  /* #6C63FF */
+  --c-accent2:  79  70  229;  /* #4F46E5 */
+  --c-scroll-thumb: 203 213 225;
+  --c-scroll-thumb-hover: 148 163 184;
+  --c-selection: 108 99 255;
+  color-scheme: light;
+}
+
 @layer base {
   html, body, #root { height: 100%; }
   body {
-    background: #0F1117;
-    color: #F0F0F5;
+    background: rgb(var(--c-bg));
+    color: rgb(var(--c-ink));
     font-family: 'Inter', system-ui, sans-serif;
     font-feature-settings: 'cv11', 'ss01', 'ss03', 'cv02';
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
+    transition: background-color .25s ease, color .25s ease;
   }
 
-  /* Ambient noise — barely-there texture to avoid flat dark surfaces */
-  body::before {
+  /* Ambient noise — only in dark mode (the overlay artifact only suits dark surfaces) */
+  :root[data-theme="dark"] body::before {
     content: '';
     position: fixed;
     inset: 0;
@@ -30,14 +67,14 @@
   *::-webkit-scrollbar { width: 8px; height: 8px; }
   *::-webkit-scrollbar-track { background: transparent; }
   *::-webkit-scrollbar-thumb {
-    background: #2E3148;
+    background: rgb(var(--c-scroll-thumb));
     border-radius: 8px;
     border: 2px solid transparent;
     background-clip: padding-box;
     transition: background .2s;
   }
-  *::-webkit-scrollbar-thumb:hover { background: #44485f; background-clip: padding-box; }
-  * { scrollbar-width: thin; scrollbar-color: #2E3148 transparent; }
+  *::-webkit-scrollbar-thumb:hover { background: rgb(var(--c-scroll-thumb-hover)); background-clip: padding-box; }
+  * { scrollbar-width: thin; scrollbar-color: rgb(var(--c-scroll-thumb)) transparent; }
 
   /* hide number-input spinners */
   input[type=number]::-webkit-inner-spin-button,
@@ -49,19 +86,19 @@
     appearance: none;
     width: 16px;
     height: 16px;
-    border: 1.5px solid #3a3e58;
+    border: 1.5px solid rgb(var(--c-border));
     border-radius: 4px;
-    background: #1A1D27;
+    background: rgb(var(--c-surface));
     cursor: pointer;
     display: inline-grid;
     place-content: center;
     transition: all .18s cubic-bezier(0.22, 1, 0.36, 1);
   }
-  .rf-check:hover { border-color: #6C63FF; }
+  .rf-check:hover { border-color: rgb(var(--c-accent)); }
   .rf-check:checked {
-    background: #6C63FF;
-    border-color: #6C63FF;
-    box-shadow: 0 0 0 4px rgba(108,99,255,0.18);
+    background: rgb(var(--c-accent));
+    border-color: rgb(var(--c-accent));
+    box-shadow: 0 0 0 4px rgb(var(--c-accent) / 0.18);
   }
   .rf-check:checked::after {
     content: '';
@@ -108,12 +145,20 @@
   .rf-skeleton {
     background: linear-gradient(
       90deg,
-      rgba(255,255,255,0.03) 0%,
-      rgba(255,255,255,0.07) 50%,
-      rgba(255,255,255,0.03) 100%
+      rgb(var(--c-ink) / 0.05) 0%,
+      rgb(var(--c-ink) / 0.10) 50%,
+      rgb(var(--c-ink) / 0.05) 100%
     );
     background-size: 200% 100%;
     animation: shimmer 1.8s linear infinite;
+  }
+
+  /* Theme-aware hairline */
+  :root[data-theme="dark"] .rf-hairline {
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05);
+  }
+  :root[data-theme="light"] .rf-hairline {
+    box-shadow: inset 0 0 0 1px rgba(15,23,42,0.05);
   }
 
   /* Card-lift on hover */

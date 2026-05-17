@@ -20,12 +20,19 @@ export default function App() {
   const { isPortal, appUrl } = useLoaderData<typeof loader>();
 
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
         {isPortal && <base href={appUrl} />}
         <link rel="preconnect" href="https://cdn.shopify.com/" />
+        {/* No-flash: apply persisted theme before paint */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "(function(){try{var t=localStorage.getItem('rf_theme');if(t!=='light'&&t!=='dark')t='dark';document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();",
+          }}
+        />
         <Meta />
         <Links />
       </head>

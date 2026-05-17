@@ -254,33 +254,40 @@ export default function DashboardPage() {
           </div>
         </Card>
 
-        {/* Portal access card */}
-        <Card title="Customer Portal" subtitle="Your public return storefront" className="lg:col-span-3 relative overflow-hidden">
+        {/* How to expose your Portal Page */}
+        <Card title="Expose your Portal Page" subtitle="How customers reach your returns" className="lg:col-span-3 relative overflow-hidden">
           {/* decorative aura */}
           <div className="absolute -top-12 -right-12 w-48 h-48 rounded-full opacity-[0.07] pointer-events-none"
                style={{ background: 'radial-gradient(circle, #6C63FF, transparent 70%)' }} />
           <div className="flex flex-col h-full relative">
             <div className="text-[13px] text-muted mb-4 leading-relaxed">
-              Share this link on your store's navigation or footer so customers can file returns.
+              Choose how to expose your return portal to customers — link it in your store
+              navigation, share a direct URL, or embed it on your website.
             </div>
-            <div className="flex items-center gap-2 p-3 rounded-lg bg-bg border border-border mb-4 group hover:border-[#3a3e58] transition-colors">
-              <Icon name="Link" size={14} className="text-faint shrink-0" />
-              <code className="text-[12px] text-accent2 flex-1 truncate font-mono">https://{shop}/apps/returns</code>
-              <button onClick={() => navigator.clipboard.writeText(`https://${shop}/apps/returns`)}
-                      className="p-1.5 text-faint hover:text-ink hover:bg-white/5 rounded transition-all rf-press"
-                      title="Copy URL">
-                <Icon name="Copy" size={14} />
-              </button>
-            </div>
+            <ul className="space-y-2 mb-5 text-[12.5px] text-ink">
+              <li className="flex items-start gap-2">
+                <Icon name="Check" size={13} className="mt-0.5 shrink-0 text-accent2" strokeWidth={2.5} />
+                <span>Add a link in your Shopify store nav or footer</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <Icon name="Check" size={13} className="mt-0.5 shrink-0 text-accent2" strokeWidth={2.5} />
+                <span>Share a direct portal URL with your customers</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <Icon name="Check" size={13} className="mt-0.5 shrink-0 text-accent2" strokeWidth={2.5} />
+                <span>Embed the portal on any page of your website</span>
+              </li>
+            </ul>
             <div className="mt-auto">
-              <a href={`https://${shop}/apps/returns`} target="_blank" rel="noreferrer"
+              <Link to="/app/settings?tab=Portal"
                  className="group inline-flex items-center justify-center gap-2 px-4 h-10 rounded-md text-white text-[13px] font-semibold transition-all rf-press
                             bg-gradient-to-b from-[#7B73FF] to-[#6259EE] hover:from-[#8B85FF] hover:to-[#6C63FF]
                             shadow-[0_1px_0_rgba(255,255,255,0.2)_inset,0_8px_22px_-6px_rgba(108,99,255,0.55)]
                             hover:shadow-[0_1px_0_rgba(255,255,255,0.25)_inset,0_12px_28px_-6px_rgba(108,99,255,0.65)]">
-                <Icon name="ExternalLink" size={14} className="transition-transform group-hover:rotate-12" />
-                Open Portal
-              </a>
+                <Icon name="Settings" size={14} className="transition-transform group-hover:rotate-90" />
+                Open Portal settings
+                <Icon name="ArrowRight" size={13} className="transition-transform group-hover:translate-x-0.5" />
+              </Link>
             </div>
           </div>
         </Card>
