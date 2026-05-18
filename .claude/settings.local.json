@@ -17,7 +17,23 @@
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Bernado ADIKPETO\\\\Desktop\\\\my_project\\\\return-flow-dev\" -Directory)",
       "Bash(Select-Object Name)",
       "Bash(Get-Item -Path .)",
-      "Bash(Select-Object FullName)"
+      "Bash(Select-Object FullName)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Bernado ADIKPETO\\\\Desktop\\\\my_project\\\\return-flow-dev\" -Recurse -Directory -ErrorAction SilentlyContinue)",
+      "Bash(Select-Object -First 20)",
+      "Bash(Format-List FullName)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Bernado ADIKPETO\\\\Desktop\\\\my_project\\\\return-flow-dev\" -Force)",
+      "Bash(Select-Object Name, PSIsContainer)",
+      "Read(//c/Users/Bernado ADIKPETO/.claude/plugins/cache/claude-plugins-official/shopify-ai-toolkit/1.2.2/skills/shopify-admin/**)",
+      "Bash(node scripts/search_docs.mjs \"Order transactions field connection\" --model claude-sonnet-4-6 --client-name claude-code --client-version 1.0)",
+      "Bash(node scripts/search_docs.mjs \"storeCreditAccountCredit mutation issue store credit\" --model claude-sonnet-4-6 --client-name claude-code --client-version 1.0)",
+      "Bash(node scripts/search_docs.mjs \"refundCreate mutation gift card\" --model claude-sonnet-4-6 --client-name claude-code --client-version 1.0)",
+      "Bash(node scripts/search_docs.mjs \"returnApprove returnCreate return management API\" --model claude-sonnet-4-6 --client-name claude-code --client-version 1.0)",
+      "Bash(node scripts/search_docs.mjs \"reverseDelivery tracking deliverable status events\" --model claude-sonnet-4-6 --client-name claude-code --client-version 1.0)",
+      "Bash(node scripts/search_docs.mjs \"draftOrderCreate exchange invoice\" --model claude-sonnet-4-6 --client-name claude-code --client-version 1.0)",
+      "Bash(node scripts/search_docs.mjs \"Order transactions first nodes example query 2025-10\" --model claude-sonnet-4-6 --client-name claude-code --client-version 1.0)",
+      "Bash(node scripts/search_docs.mjs \"order query transactions example\" --model claude-sonnet-4-6 --client-name claude-code --client-version 1.0)",
+      "Bash(node scripts/validate.mjs --code 'query GetOrderForRefund\\($id: ID!\\) { order\\(id: $id\\) { id currencyCode customer { id email } transactions\\(first: 50\\) { id kind status gateway amountSet { shopMoney { amount currencyCode } } } lineItems\\(first: 50\\) { edges { node { id variant { id } quantity } } } } }' --model claude-sonnet-4-6 --client-name claude-code --client-version 1.0 --artifact-id refund-order-query-001 --revision 1)",
+      "Bash(node scripts/validate.mjs --code 'mutation IssueStoreCredit\\($id: ID!, $creditInput: StoreCreditAccountCreditInput!\\) { storeCreditAccountCredit\\(id: $id, creditInput: $creditInput\\) { storeCreditAccountTransaction { id amount { amount currencyCode } account { id balance { amount currencyCode } } } userErrors { field message code } } }' --model claude-sonnet-4-6 --client-name claude-code --client-version 1.0 --artifact-id store-credit-mutation-001 --revision 1)"
     ]
   }
 }

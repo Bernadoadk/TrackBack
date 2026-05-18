@@ -7,6 +7,7 @@ import { getShopPlan } from "../lib/plan.server";
 import { Icon } from "../components/ui";
 import { REFUND_TYPES } from "../components/mock-data";
 import { sendReturnEmail } from "../lib/mailer.server";
+import { getTrackingUrl } from "../lib/carriers.server";
 import ChatWidget from "../components/ChatWidget";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -477,9 +478,29 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return { trackingError: "No approved return found with that RMA and email. Please check and try again." };
     }
 
+    const trackingUrl = getTrackingUrl(carrier, trackingNumber);
+    const now = new Date();
+
     await prisma.returnRequest.update({
       where: { id: rr.id },
-      data: { status: 'SHIPPED', shippedAt: new Date(), carrier, trackingNumber }
+      data: {
+        status: 'SHIPPED',
+        shippedAt: now,
+        carrier,
+        trackingNumber,
+        ...(trackingUrl && { trackingUrl }),
+      }
+    });
+
+    await prisma.returnEvent.create({
+      data: {
+        returnRequestId: rr.id,
+        type: 'SHIPPED',
+        source: 'customer',
+        title: 'Items Shipped',
+        detail: `${carrier} · ${trackingNumber}`,
+        meta: JSON.stringify({ carrier, trackingNumber, trackingUrl }),
+      }
     });
 
     await sendReturnEmail("Shipped", {
@@ -491,9 +512,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       order_number: rr.orderName,
       carrier,
       tracking_number: trackingNumber,
+      tracking_url: trackingUrl ?? undefined,
     });
 
-    return { trackingSuccess: true, trackingRma: rma };
+    return { trackingSuccess: true, trackingRma: rma, trackingUrl: trackingUrl ?? null, trackingCarrier: carrier };
   }
 
   return null;
@@ -1026,6 +1048,7 @@ function StepFindOrder({ orderNum, setOrderNum, email, setEmail, onNext, canCont
   };
 
   if (trackingSubmitted) {
+    const trackingUrl = (fetcher?.data as any)?.trackingUrl as string | null | undefined;
     return (
       <div className="text-center py-8">
         <div className="w-14 h-14 rounded-full grid place-content-center mx-auto mb-4" style={{ background: '#10B98115' }}>
@@ -1033,9 +1056,18 @@ function StepFindOrder({ orderNum, setOrderNum, email, setEmail, onNext, canCont
         </div>
         <h2 className="text-[20px] font-bold text-[#0f1117]">Tracking submitted!</h2>
         <p className="text-[13.5px] text-[#666] mt-2 max-w-xs mx-auto">Your carrier and tracking number have been saved. We'll update you when we receive your package.</p>
-        <button onClick={onTrackingReset} className="mt-6 text-[13px] font-semibold" style={{ color: 'var(--brand)' }}>
-          Submit another return
-        </button>
+        {trackingUrl && (
+          <a href={trackingUrl} target="_blank" rel="noopener noreferrer"
+             className="inline-flex items-center gap-2 mt-5 px-4 py-2.5 rounded-lg text-[13px] font-semibold transition"
+             style={{ background: 'var(--brand)', color: '#fff' }}>
+            <Icon name="ExternalLink" size={14} /> Track your package live
+          </a>
+        )}
+        <div className="mt-4">
+          <button onClick={onTrackingReset} className="text-[13px] font-semibold" style={{ color: 'var(--brand)' }}>
+            Submit another return
+          </button>
+        </div>
       </div>
     );
   }

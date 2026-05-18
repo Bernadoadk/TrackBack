@@ -26,8 +26,11 @@ export async function sendReturnEmail(
     rejection_reason?: string;
     carrier?: string;
     tracking_number?: string;
+    tracking_url?: string;
     store_credit_code?: string;
     label_url?: string;
+    exchange_url?: string;
+    refund_method?: string;
   }
 ) {
   try {
@@ -54,11 +57,19 @@ export async function sendReturnEmail(
     }
 
     const storeCreditBlock = data.store_credit_code
-      ? `\n\nYour store credit code: ${data.store_credit_code}\nUse it at checkout — it's already loaded for $${data.refund_amount || ''}.`
+      ? `\n\nYour store credit: ${data.store_credit_code}\nIt's been added to your account and will be applied automatically at your next checkout.`
       : "";
 
     const labelBlock = data.label_url
       ? `\n\nDownload your prepaid shipping label: ${data.label_url}`
+      : "";
+
+    const trackingBlock = data.tracking_url
+      ? `\n\nTrack your return live: ${data.tracking_url}`
+      : "";
+
+    const exchangeBlock = data.exchange_url
+      ? `\n\nComplete your exchange here: ${data.exchange_url}\nThe credit from your return has already been applied.`
       : "";
 
     const fill = (s: string) => s
@@ -70,10 +81,14 @@ export async function sendReturnEmail(
       .replace(/\{\{rejection_reason\}\}/g, data.rejection_reason || "")
       .replace(/\{\{carrier\}\}/g, data.carrier || "N/A")
       .replace(/\{\{tracking_number\}\}/g, data.tracking_number || "N/A")
+      .replace(/\{\{tracking_url\}\}/g, data.tracking_url || "")
       .replace(/\{\{store_credit_code\}\}/g, data.store_credit_code || "")
       .replace(/\{\{label_url\}\}/g, data.label_url || "")
+      .replace(/\{\{exchange_url\}\}/g, data.exchange_url || "")
       + (type === "Approved" && data.label_url ? labelBlock : "")
-      + (type === "Refunded" && data.store_credit_code ? storeCreditBlock : "");
+      + (type === "Shipped" && data.tracking_url ? trackingBlock : "")
+      + (type === "Refunded" && data.store_credit_code ? storeCreditBlock : "")
+      + (type === "Refunded" && data.exchange_url ? exchangeBlock : "");
 
     const from = data.fromEmail
       ? `"${process.env.SMTP_FROM_NAME || "ReturnFlow"}" <${data.fromEmail}>`

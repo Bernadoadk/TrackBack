@@ -122,13 +122,27 @@ model ReturnRequest {
   exchangeNote      String?   // Desired exchange item/size (when refundType = EXCHANGE)
   exchangeOrderId   String?   // Shopify DraftOrder GID
   exchangeOrderUrl  String?   // Shopify DraftOrder invoice URL
+  customerId        String?   // Shopify Customer GID (cached for store credit + tracking)
   labelUrl          String?
-  trackingNumber  String?
-  carrier         String?
-  shippedAt       DateTime?
-  
-  items           ReturnItem[]
-  notes           InternalNote[]
+  trackingNumber    String?
+  trackingUrl       String?   // Resolved carrier tracking URL (filled when carrier+number set)
+  carrier           String?
+
+  // Lifecycle timestamps — populated on transition for accurate timeline
+  approvedAt        DateTime?
+  shippedAt         DateTime?
+  receivedAt        DateTime?
+  refundedAt        DateTime?
+  rejectedAt        DateTime?
+
+  // Refund execution details
+  refundId          String?   // Shopify Refund GID (when ORIGINAL_PAYMENT / gift_card)
+  storeCreditTxId   String?   // Shopify StoreCreditAccountTransaction GID
+  storeCreditCode   String?   // Last 4 of gift card, or "Store credit" label
+
+  items             ReturnItem[]
+  notes             InternalNote[]
+  events            ReturnEvent[]
   
   settings        ShopSettings   @relation(fields: [shop], references: [shop], onDelete: Cascade)
 
@@ -152,6 +166,28 @@ model ReturnItem {
   imageUrl        String?
 
   returnRequest   ReturnRequest @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
+}
+
+// Audit log d'événements lifecycle pour un retour (timeline en temps réel)
+// Chaque transition de status, événement carrier (in_transit, delivered) ou
+// action notable y est consignée. Sert de "source of truth" pour la Timeline UI.
+model ReturnEvent {
+  id              String        @id @default(cuid())
+  returnRequestId String
+
+  // Types: REQUESTED, APPROVED, REJECTED, SHIPPED, IN_TRANSIT, OUT_FOR_DELIVERY,
+  // DELIVERED, RECEIVED, REFUNDED, EXCHANGE_CREATED, EXPIRED, NOTE, TRACKING_UPDATED
+  type            String
+  source          String        @default("merchant") // merchant | customer | system | carrier
+  title           String        // Short display label
+  detail          String?       // Optional human-readable details
+  meta            String?       // JSON blob for extra structured data (carrier, tracking, location...)
+
+  returnRequest   ReturnRequest @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
+
+  createdAt       DateTime      @default(now())
+
+  @@index([returnRequestId, createdAt])
 }
 
 // Notes internes pour l'équipe sur une demande de retour
