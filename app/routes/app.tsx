@@ -46,7 +46,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   const PLAN_LIMITS: Record<string, number> = { free: 10, starter: 100, pro: 999999 };
-  const planName: string = billing?.plan ?? 'free';
+  const planName: string = (billing?.status === 'active' ? billing?.plan : null) ?? 'free';
   const planLimit: number = PLAN_LIMITS[planName] ?? 10;
 
   return { apiKey: process.env.SHOPIFY_API_KEY || "", pendingCount, unreadCount, shop, shopName, planName, usedThisMonth, planLimit };

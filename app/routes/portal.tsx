@@ -354,10 +354,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     }
 
-    // Enforce monthly plan limit
+    // Enforce monthly plan limit — only count active (paid) subscriptions
     const PLAN_LIMITS: Record<string, number> = { free: 10, starter: 100, pro: 999999 };
     const billing = await prisma.billingSubscription.findUnique({ where: { shop } });
-    const planLimit = PLAN_LIMITS[billing?.plan ?? 'free'] ?? 10;
+    const activePlan = (billing?.status === 'active' ? billing?.plan : null) ?? 'free';
+    const planLimit = PLAN_LIMITS[activePlan] ?? 10;
     if (planLimit < 999999) {
       const firstDayOfMonth = new Date();
       firstDayOfMonth.setDate(1);
@@ -366,7 +367,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         where: { shop, createdAt: { gte: firstDayOfMonth } }
       });
       if (usedThisMonth >= planLimit) {
-        return { error: `Your store has reached the ${planLimit} returns/month limit on the ${billing?.plan ?? 'free'} plan. Please upgrade to continue accepting returns.` };
+        return { error: `Your store has reached the ${planLimit} returns/month limit on the ${activePlan} plan. Please upgrade to continue accepting returns.` };
       }
     }
 

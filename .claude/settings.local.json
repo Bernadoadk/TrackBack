@@ -11,7 +11,11 @@
       "Bash(npm run *)",
       "Bash(npx shopify *)",
       "Bash(findstr \"application_url\")",
-      "Read(//c/Users/Bernado ADIKPETO/Desktop/Victim_projects/quote-flow/**)"
+      "Read(//c/Users/Bernado ADIKPETO/Desktop/Victim_projects/quote-flow/**)",
+      "WebFetch(domain:www.aftership.com)",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\Bernado ADIKPETO\\\\Desktop\\\\my_project\\\\return-flow-dev\" -Force | Select-Object Name, @{Name=\"Type\"; Expression={if \\($_.PSIsContainer\\) { \"DIR\" } else { \"FILE\" }}} | Format-Table -AutoSize)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Bernado ADIKPETO\\\\Desktop\\\\my_project\\\\return-flow-dev\" -Directory)",
+      "Bash(Select-Object Name)"
     ]
   }
 }

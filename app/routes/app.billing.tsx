@@ -4,7 +4,7 @@ import { useLoaderData, useFetcher } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { PageHeader, Card, Btn, Icon, useToast } from "../components/ui";
-import { isBillingTestMode } from "../lib/plan.server";
+import { isBillingTestMode, getShopPlan } from "../lib/plan.server";
 
 const PLANS = [
   { id: 'free',    name: 'Free',    price: 0,  unit: 'forever', monthlyLimit: 10,
@@ -35,7 +35,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Verify the charge status and activate if confirmed.
   const url = new URL(request.url);
   const chargeId = url.searchParams.get("charge_id");
+  const pendingPlan = billing.plan; // capture before any update
   if (chargeId && billing.status === 'pending') {
+    let activated = false;
     try {
       const gid = `gid://shopify/AppSubscription/${chargeId}`;
       const resp = await admin.graphql(
@@ -53,18 +55,34 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         billing = await prisma.billingSubscription.update({
           where: { shop },
           data: {
+            plan: pendingPlan,
             status: 'active',
             shopifyChargeId: chargeId,
-            trialEndsAt: new Date(Date.now() + 14 * 86400000),
           },
         });
+        activated = true;
       } else if (status === 'DECLINED' || status === 'EXPIRED') {
         billing = await prisma.billingSubscription.update({
           where: { shop },
           data: { plan: 'free', status: 'active', shopifyChargeId: null },
         });
+        activated = true;
       }
-    } catch (_) { /* ignore — stale URL or dev env */ }
+    } catch (e) {
+      console.error('[billing] charge verification failed:', e);
+    }
+    // Fallback for test/dev mode: if verification failed or returned no status,
+    // activate the pending plan so features are not left locked.
+    if (!activated && isBillingTestMode()) {
+      try {
+        billing = await prisma.billingSubscription.update({
+          where: { shop },
+          data: { plan: pendingPlan, status: 'active', shopifyChargeId: chargeId },
+        });
+      } catch (e) {
+        console.error('[billing] fallback activation failed:', e);
+      }
+    }
   }
 
   // Count this month's returns
@@ -225,7 +243,7 @@ export default function BillingPage() {
   useEffect(() => {
     if (activated && !shownActivated.current) {
       shownActivated.current = true;
-      toast({ kind: 'success', title: `${currentPlan.name} plan activated!`, body: 'Your 14-day free trial has started.' });
+      toast({ kind: 'success', title: `${currentPlan.name} plan activated!` });
     }
   }, [activated]);
 
@@ -292,11 +310,6 @@ export default function BillingPage() {
                 <span className="text-[11px] px-2 py-0.5 rounded font-semibold" style={{ background: 'rgba(245,158,11,0.12)', color: '#F59E0B' }}>
                   {limit > 1000 ? 'Unlimited' : `${limit} returns/month`}
                 </span>
-                {billing.status === 'active' && billing.trialEndsAt && new Date(billing.trialEndsAt) > new Date() && (
-                  <span className="text-[11px] px-2 py-0.5 rounded font-semibold" style={{ background: 'rgba(34,197,94,0.12)', color: '#22C55E' }}>
-                    Trial ends {new Date(billing.trialEndsAt).toLocaleDateString()}
-                  </span>
-                )}
               </div>
               <div className="text-[12.5px] text-muted mt-1">
                 {currentPlan.id === 'free' ? 'Upgrade to unlock branding, analytics and unlimited returns.' : `${currentPlan.summary} · Cancel anytime.`}
@@ -391,8 +404,8 @@ export default function BillingPage() {
       </div>
 
       <div className="text-center text-[12.5px] text-muted mb-8 flex items-center justify-center gap-1.5">
-        <Icon name="Gift" size={13} className="text-accent2"/>
-        <span><span className="text-ink font-medium">14-day free trial</span> on all paid plans. Cancel anytime.</span>
+        <Icon name="Shield" size={13} className="text-accent2"/>
+        <span>Cancel anytime. No trial period.</span>
       </div>
 
       <div className="mt-8 p-5 rounded-lg border border-divider bg-bg/30 flex items-start gap-3">

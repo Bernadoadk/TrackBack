@@ -23,7 +23,6 @@ const shopify = shopifyApp({
   },
   billing: {
     "Starter": {
-      trialDays: 14,
       replacementBehavior: BillingReplacementBehavior.ApplyImmediately,
       lineItems: [
         {
@@ -34,7 +33,6 @@ const shopify = shopifyApp({
       ],
     },
     "Pro": {
-      trialDays: 14,
       replacementBehavior: BillingReplacementBehavior.ApplyImmediately,
       lineItems: [
         {
