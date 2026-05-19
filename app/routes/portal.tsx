@@ -83,7 +83,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       labelBackToStore: "Back to store",
       labelCantFind: "Can't find your order?",
       labelStartAnother: "Start another return",
-      labelPoweredBy: "Secured by ReturnFlow",
+      labelPoweredBy: "Secured by TrackBack",
       labelTrackingToggle: "Already shipped your return? Submit tracking",
       liveChatEnabled: true,
       liveChatIcon: "MessageCircle",
@@ -91,9 +91,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   const plan = shop ? await getShopPlan(shop) : 'free';
-  // Non-Pro shops always show the ReturnFlow attribution
+  // Non-Pro shops always show the TrackBack attribution
   if (plan !== 'pro' && settings) {
-    (settings as any).labelPoweredBy = 'Secured by ReturnFlow';
+    (settings as any).labelPoweredBy = 'Secured by TrackBack';
   }
   // Live chat with customers is a Pro feature — force-disable for lower plans
   if (plan !== 'pro' && settings) {
@@ -131,18 +131,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
   const intent = formData.get("intent");
 
-    if (intent === "find_order") {
-      const orderNum = (formData.get("orderNum") as string).trim();
-      const email = (formData.get("email") as string).trim().toLowerCase();
+  if (intent === "find_order") {
+    const orderNum = (formData.get("orderNum") as string).trim();
+    const email = (formData.get("email") as string).trim().toLowerCase();
 
-      if (!admin) {
-        return { error: `Store session not found for ${shop}. Please open the app from your Shopify admin first.` };
-      }
+    if (!admin) {
+      return { error: `Store session not found for ${shop}. Please open the app from your Shopify admin first.` };
+    }
 
-      try {
-        const simpleOrderNum = orderNum.replace(/^#/, "").trim();
+    try {
+      const simpleOrderNum = orderNum.replace(/^#/, "").trim();
 
-        const ORDER_QUERY = `#graphql
+      const ORDER_QUERY = `#graphql
           query FindOrder($query: String!) {
             orders(first: 20, query: $query) {
               edges {
@@ -173,158 +173,158 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             }
           }`;
 
-        // Strategy 1: query by email (exact, reliable) then filter by order name in JS
-        // Strategy 2: fallback — query by name (various formats) then filter by email in JS
-        let orderNode: any = null;
-        const debugLines: string[] = [];
+      // Strategy 1: query by email (exact, reliable) then filter by order name in JS
+      // Strategy 2: fallback — query by name (various formats) then filter by email in JS
+      let orderNode: any = null;
+      const debugLines: string[] = [];
 
-        const runQuery = async (q: string) => {
-          const resp = await admin.graphql(ORDER_QUERY, { variables: { query: q } });
-          const json = await resp.json();
-          if (json.errors) {
-            const msg = JSON.stringify(json.errors);
-            console.error(`[portal] GraphQL errors for q="${q}":`, msg);
-            debugLines.push(`q="${q}" → GraphQL error: ${msg}`);
-            return [];
-          }
-          const edges = json.data?.orders?.edges || [];
-          console.log(`[portal] q="${q}" → ${edges.length} result(s)`);
-          debugLines.push(`q="${q}" → ${edges.length} result(s)`);
-          return edges;
-        };
-
-        // --- Email-first approach ---
-        const byEmail = await runQuery(`email:${email}`);
-        if (byEmail.length > 0) {
-          const match = byEmail.find((e: any) =>
-            e.node.name.replace(/^#/, "").trim() === simpleOrderNum
-          );
-          if (match) { orderNode = match.node; }
-          else {
-            const found = byEmail.map((e: any) => e.node.name).join(", ");
-            debugLines.push(`email match found orders [${found}] but none is #${simpleOrderNum}`);
-          }
+      const runQuery = async (q: string) => {
+        const resp = await admin.graphql(ORDER_QUERY, { variables: { query: q } });
+        const json = await resp.json();
+        if (json.errors) {
+          const msg = JSON.stringify(json.errors);
+          console.error(`[portal] GraphQL errors for q="${q}":`, msg);
+          debugLines.push(`q="${q}" → GraphQL error: ${msg}`);
+          return [];
         }
+        const edges = json.data?.orders?.edges || [];
+        console.log(`[portal] q="${q}" → ${edges.length} result(s)`);
+        debugLines.push(`q="${q}" → ${edges.length} result(s)`);
+        return edges;
+      };
 
-        // --- Fallback: name-based queries ---
-        if (!orderNode) {
-          const nameQueries = [
-            `name:#${simpleOrderNum}`,
-            `name:${simpleOrderNum}`,
-            `name:"#${simpleOrderNum}"`,
-          ];
-          for (const q of nameQueries) {
-            const edges = await runQuery(q);
-            if (edges.length > 0) {
-              const match = edges.find((e: any) =>
-                e.node.email?.toLowerCase().trim() === email
-              );
-              if (match) {
-                orderNode = match.node;
-                break;
-              } else {
-                const found = edges.map((e: any) => `${e.node.name}/${e.node.email ?? 'no-email'}`).join(", ");
-                debugLines.push(`name match found [${found}] but email mismatch (expected: ${email})`);
-              }
+      // --- Email-first approach ---
+      const byEmail = await runQuery(`email:${email}`);
+      if (byEmail.length > 0) {
+        const match = byEmail.find((e: any) =>
+          e.node.name.replace(/^#/, "").trim() === simpleOrderNum
+        );
+        if (match) { orderNode = match.node; }
+        else {
+          const found = byEmail.map((e: any) => e.node.name).join(", ");
+          debugLines.push(`email match found orders [${found}] but none is #${simpleOrderNum}`);
+        }
+      }
+
+      // --- Fallback: name-based queries ---
+      if (!orderNode) {
+        const nameQueries = [
+          `name:#${simpleOrderNum}`,
+          `name:${simpleOrderNum}`,
+          `name:"#${simpleOrderNum}"`,
+        ];
+        for (const q of nameQueries) {
+          const edges = await runQuery(q);
+          if (edges.length > 0) {
+            const match = edges.find((e: any) =>
+              e.node.email?.toLowerCase().trim() === email
+            );
+            if (match) {
+              orderNode = match.node;
+              break;
+            } else {
+              const found = edges.map((e: any) => `${e.node.name}/${e.node.email ?? 'no-email'}`).join(", ");
+              debugLines.push(`name match found [${found}] but email mismatch (expected: ${email})`);
             }
           }
         }
+      }
 
-        // --- Diagnostic: show recent orders if nothing found at all ---
-        if (!orderNode) {
-          try {
-            const diagResp = await admin.graphql(`#graphql
+      // --- Diagnostic: show recent orders if nothing found at all ---
+      if (!orderNode) {
+        try {
+          const diagResp = await admin.graphql(`#graphql
               query DiagRecentOrders {
                 orders(first: 5, sortKey: CREATED_AT, reverse: true) {
                   edges { node { name email } }
                 }
               }`);
-            const diagJson = await diagResp.json();
-            const diagEdges = diagJson.data?.orders?.edges || [];
-            if (diagEdges.length > 0) {
-              const recent = diagEdges.map((e: any) =>
-                `${e.node.name}/${e.node.email ?? 'no-email'}`
-              ).join(" | ");
-              console.log("[portal] Recent store orders:", recent);
-              debugLines.push(`Recent store orders: ${recent}`);
-            } else {
-              console.log("[portal] No orders found in store at all");
-              debugLines.push("No orders in store");
-            }
-          } catch (_diagErr) { /* ignore diag errors */ }
-
-          const devHint = process.env.NODE_ENV !== "production"
-            ? ` — Debug: ${debugLines.join("; ")}`
-            : "";
-          return { error: `Order not found. Please check your order number and email address.${devHint}` };
-        }
-
-        // Fetch shop settings for blocklist + return window
-        const actionSettings = await prisma.shopSettings.findUnique({ where: { shop } });
-
-        // Parse blocklist from settings (comma-separated SKUs / product IDs)
-        const blockedSkusRaw = actionSettings?.blockedSkus ?? "";
-        const blockedList = blockedSkusRaw
-          .split(",")
-          .map((s: string) => s.trim().toLowerCase())
-          .filter(Boolean);
-
-        // Check if order is fulfilled (warn if not)
-        const isFulfilled = orderNode.displayFulfillmentStatus !== 'UNFULFILLED';
-
-        const items = orderNode.lineItems.edges
-          .filter((edge: any) => edge.node.product && edge.node.variant)
-          .map((edge: any) => {
-            const n = edge.node;
-            const productId = n.product.id?.toLowerCase() ?? "";
-            // Check if this item is blocked
-            const isBlocked = blockedList.some(
-              (b: string) => productId.includes(b) || (n.sku && n.sku.toLowerCase() === b)
-            );
-            return {
-              id: n.id,
-              productId: n.product.id,
-              variantId: n.variant.id,
-              name: n.title,
-              variant: n.variantTitle || "Default Title",
-              quantity: n.quantity,
-              price: parseFloat(n.discountedTotalSet.shopMoney.amount) / n.quantity,
-              image: n.image?.url || null,
-              blocked: isBlocked,
-            };
-          });
-
-        // --- Return window validation ---
-        const returnWindow = actionSettings?.returnWindow ?? 30;
-        const orderDate = new Date(orderNode.createdAt);
-        const daysSinceOrder = Math.floor((Date.now() - orderDate.getTime()) / (1000 * 60 * 60 * 24));
-        if (daysSinceOrder > returnWindow) {
-          return {
-            error: `This order is outside the ${returnWindow}-day return window (ordered ${daysSinceOrder} days ago). Please contact support if you need assistance.`
-          };
-        }
-
-        const firstName = orderNode.customer?.firstName || '';
-        const lastName  = orderNode.customer?.lastName  || '';
-        const customerName = [firstName, lastName].filter(Boolean).join(' ') || email.split('@')[0];
-
-        return {
-          order: {
-            id: orderNode.id,
-            name: orderNode.name,
-            email: orderNode.email,
-            createdAt: orderNode.createdAt,
-            customerName,
-            orderTotal: parseFloat(orderNode.totalPriceSet.shopMoney.amount),
-            isFulfilled,
-            items
+          const diagJson = await diagResp.json();
+          const diagEdges = diagJson.data?.orders?.edges || [];
+          if (diagEdges.length > 0) {
+            const recent = diagEdges.map((e: any) =>
+              `${e.node.name}/${e.node.email ?? 'no-email'}`
+            ).join(" | ");
+            console.log("[portal] Recent store orders:", recent);
+            debugLines.push(`Recent store orders: ${recent}`);
+          } else {
+            console.log("[portal] No orders found in store at all");
+            debugLines.push("No orders in store");
           }
-        };
-      } catch (e: any) {
-        console.error("[portal] find_order exception:", e);
-        return { error: `An error occurred: ${e?.message || "unknown error"}` };
+        } catch (_diagErr) { /* ignore diag errors */ }
+
+        const devHint = process.env.NODE_ENV !== "production"
+          ? ` — Debug: ${debugLines.join("; ")}`
+          : "";
+        return { error: `Order not found. Please check your order number and email address.${devHint}` };
       }
+
+      // Fetch shop settings for blocklist + return window
+      const actionSettings = await prisma.shopSettings.findUnique({ where: { shop } });
+
+      // Parse blocklist from settings (comma-separated SKUs / product IDs)
+      const blockedSkusRaw = actionSettings?.blockedSkus ?? "";
+      const blockedList = blockedSkusRaw
+        .split(",")
+        .map((s: string) => s.trim().toLowerCase())
+        .filter(Boolean);
+
+      // Check if order is fulfilled (warn if not)
+      const isFulfilled = orderNode.displayFulfillmentStatus !== 'UNFULFILLED';
+
+      const items = orderNode.lineItems.edges
+        .filter((edge: any) => edge.node.product && edge.node.variant)
+        .map((edge: any) => {
+          const n = edge.node;
+          const productId = n.product.id?.toLowerCase() ?? "";
+          // Check if this item is blocked
+          const isBlocked = blockedList.some(
+            (b: string) => productId.includes(b) || (n.sku && n.sku.toLowerCase() === b)
+          );
+          return {
+            id: n.id,
+            productId: n.product.id,
+            variantId: n.variant.id,
+            name: n.title,
+            variant: n.variantTitle || "Default Title",
+            quantity: n.quantity,
+            price: parseFloat(n.discountedTotalSet.shopMoney.amount) / n.quantity,
+            image: n.image?.url || null,
+            blocked: isBlocked,
+          };
+        });
+
+      // --- Return window validation ---
+      const returnWindow = actionSettings?.returnWindow ?? 30;
+      const orderDate = new Date(orderNode.createdAt);
+      const daysSinceOrder = Math.floor((Date.now() - orderDate.getTime()) / (1000 * 60 * 60 * 24));
+      if (daysSinceOrder > returnWindow) {
+        return {
+          error: `This order is outside the ${returnWindow}-day return window (ordered ${daysSinceOrder} days ago). Please contact support if you need assistance.`
+        };
+      }
+
+      const firstName = orderNode.customer?.firstName || '';
+      const lastName = orderNode.customer?.lastName || '';
+      const customerName = [firstName, lastName].filter(Boolean).join(' ') || email.split('@')[0];
+
+      return {
+        order: {
+          id: orderNode.id,
+          name: orderNode.name,
+          email: orderNode.email,
+          createdAt: orderNode.createdAt,
+          customerName,
+          orderTotal: parseFloat(orderNode.totalPriceSet.shopMoney.amount),
+          isFulfilled,
+          items
+        }
+      };
+    } catch (e: any) {
+      console.error("[portal] find_order exception:", e);
+      return { error: `An error occurred: ${e?.message || "unknown error"}` };
     }
+  }
 
   if (intent === "submit_return") {
     const orderId = formData.get("orderId") as string;
@@ -524,7 +524,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 export default function PortalPage() {
   const { settings, shop } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
-  
+
   const [step, setStep] = useState(1);
   const [orderNum, setOrderNum] = useState('');
   const [email, setEmail] = useState('');
@@ -593,8 +593,8 @@ export default function PortalPage() {
   };
 
   const chatPrefillEmail = (orderData?.email || email || '').toLowerCase();
-  const chatPrefillName  = orderData?.customerName || '';
-  const chatEnabled      = (settings as any)?.liveChatEnabled !== false;
+  const chatPrefillName = orderData?.customerName || '';
+  const chatEnabled = (settings as any)?.liveChatEnabled !== false;
 
   if (submittedRma) {
     return (
@@ -653,10 +653,10 @@ export default function PortalPage() {
     }, { method: 'POST' });
   };
 
-  const layout    = settings?.portalLayout || 'classic';
+  const layout = settings?.portalLayout || 'classic';
   const isSidebar = layout === 'sidebar';
   const isMinimal = layout === 'minimal';
-  const isBold    = layout === 'bold';
+  const isBold = layout === 'bold';
   const isCompact = layout === 'compact';
 
   const stepperEl = (
@@ -681,18 +681,18 @@ export default function PortalPage() {
       </div>
       <div className="h-[3px] rounded-full overflow-hidden" style={{ background: '#eef0f4' }}>
         <div className="h-full rounded-full transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]"
-             style={{
-               width: `${((Math.max(1, Math.min(stepperCurrent, STEPS.length)) - 1) / (STEPS.length - 1)) * 100}%`,
-               background: 'linear-gradient(90deg, var(--brand), color-mix(in srgb, var(--brand) 65%, white))',
-             }} />
+          style={{
+            width: `${((Math.max(1, Math.min(stepperCurrent, STEPS.length)) - 1) / (STEPS.length - 1)) * 100}%`,
+            background: 'linear-gradient(90deg, var(--brand), color-mix(in srgb, var(--brand) 65%, white))',
+          }} />
       </div>
     </div>
   );
 
   const topEl = isSidebar ? null
-              : isMinimal ? minimalProgressEl
-              : isCompact ? null
-              : stepperEl;
+    : isMinimal ? minimalProgressEl
+      : isCompact ? null
+        : stepperEl;
 
   const cardClass = isMinimal
     ? "mt-6 animate-slideUp"
@@ -712,75 +712,75 @@ export default function PortalPage() {
 
   return (
     <>
-    <PortalShell settings={settings} shop={shop} steps={STEPS} stepperCurrent={stepperCurrent}>
-      {topEl}
+      <PortalShell settings={settings} shop={shop} steps={STEPS} stepperCurrent={stepperCurrent}>
+        {topEl}
 
-      <div key={step}
-           className={cardClass}
-           style={cardStyle}>
-        {step === 1 && (
-          <StepFindOrder orderNum={orderNum} setOrderNum={setOrderNum} email={email} setEmail={setEmail}
-                         onNext={handleFindOrder} canContinue={canContinue[1]} isLoading={fetcher.state !== 'idle'}
-                         error={(fetcher.data as any)?.error} shop={shop}
-                         shopSettings={settings}
-                         fetcher={fetcher} trackingSubmitted={trackingSubmitted}
-                         onTrackingReset={() => setTrackingSubmitted(false)} />
-        )}
-        {step === 2 && orderData && (
-          <StepSelectItems items={orderData.items} orderName={orderData.name} date={orderData.createdAt}
-                           isFulfilled={orderData.isFulfilled}
-                           shopSettings={settings}
-                           selectedItems={selectedItems} setSelectedItems={setSelectedItems}
-                           onBack={() => go(1)} onNext={() => canContinue[2] && go(3)} canContinue={canContinue[2]} />
-        )}
-        {step === 3 && (
-          <StepReasons itemsList={itemsList} reasons={reasons} setReasons={setReasons}
-                       notes={notes} setNotes={setNotes}
-                       totalSteps={STEPS.length}
-                       shopSettings={settings}
-                       reasonOptions={(settings?.reasons ?? []).filter((r: any) => r.enabled).map((r: any) => r.label)}
-                       onBack={() => go(prevFrom(3))} onNext={() => canContinue[3] && go(nextFrom(3))} canContinue={canContinue[3]} />
-        )}
-        {step === 4 && showRefundStep && (
-          <StepRefundType availableRefundTypes={availableRefundTypes}
-            refundType={refundType} setRefundType={setRefundType}
-            exchangeNote={exchangeNote} setExchangeNote={setExchangeNote}
-            totalRefund={totalRefund} shopSettings={settings} totalSteps={STEPS.length}
-            onBack={() => go(prevFrom(4))} onNext={() => canContinue[4] && go(nextFrom(4))} canContinue={canContinue[4]} />
-        )}
-        {step === confirmStep && (
-          <StepConfirm itemsList={itemsList} selectedItems={selectedItems} reasons={reasons} notes={notes}
-                       totalRefund={totalRefund} email={email}
-                       refundType={refundType} shopSettings={settings}
-                       totalSteps={STEPS.length} isLoading={fetcher.state !== 'idle'}
-                       error={(fetcher.data as any)?.error}
-                       onBack={() => go(prevFrom(confirmStep))} onSubmit={handleSubmitReturn} />
-        )}
-      </div>
-
-      {(isMinimal || isSidebar) ? null : isCompact ? (
-        <div className="text-center text-[11px] text-[#cbd5e1] mt-3 flex items-center justify-center gap-1.5">
-          <Icon name="Lock" size={10} /> {settings?.labelPoweredBy || 'Secured by ReturnFlow'}
+        <div key={step}
+          className={cardClass}
+          style={cardStyle}>
+          {step === 1 && (
+            <StepFindOrder orderNum={orderNum} setOrderNum={setOrderNum} email={email} setEmail={setEmail}
+              onNext={handleFindOrder} canContinue={canContinue[1]} isLoading={fetcher.state !== 'idle'}
+              error={(fetcher.data as any)?.error} shop={shop}
+              shopSettings={settings}
+              fetcher={fetcher} trackingSubmitted={trackingSubmitted}
+              onTrackingReset={() => setTrackingSubmitted(false)} />
+          )}
+          {step === 2 && orderData && (
+            <StepSelectItems items={orderData.items} orderName={orderData.name} date={orderData.createdAt}
+              isFulfilled={orderData.isFulfilled}
+              shopSettings={settings}
+              selectedItems={selectedItems} setSelectedItems={setSelectedItems}
+              onBack={() => go(1)} onNext={() => canContinue[2] && go(3)} canContinue={canContinue[2]} />
+          )}
+          {step === 3 && (
+            <StepReasons itemsList={itemsList} reasons={reasons} setReasons={setReasons}
+              notes={notes} setNotes={setNotes}
+              totalSteps={STEPS.length}
+              shopSettings={settings}
+              reasonOptions={(settings?.reasons ?? []).filter((r: any) => r.enabled).map((r: any) => r.label)}
+              onBack={() => go(prevFrom(3))} onNext={() => canContinue[3] && go(nextFrom(3))} canContinue={canContinue[3]} />
+          )}
+          {step === 4 && showRefundStep && (
+            <StepRefundType availableRefundTypes={availableRefundTypes}
+              refundType={refundType} setRefundType={setRefundType}
+              exchangeNote={exchangeNote} setExchangeNote={setExchangeNote}
+              totalRefund={totalRefund} shopSettings={settings} totalSteps={STEPS.length}
+              onBack={() => go(prevFrom(4))} onNext={() => canContinue[4] && go(nextFrom(4))} canContinue={canContinue[4]} />
+          )}
+          {step === confirmStep && (
+            <StepConfirm itemsList={itemsList} selectedItems={selectedItems} reasons={reasons} notes={notes}
+              totalRefund={totalRefund} email={email}
+              refundType={refundType} shopSettings={settings}
+              totalSteps={STEPS.length} isLoading={fetcher.state !== 'idle'}
+              error={(fetcher.data as any)?.error}
+              onBack={() => go(prevFrom(confirmStep))} onSubmit={handleSubmitReturn} />
+          )}
         </div>
-      ) : (
-        <div className="text-center text-[12px] text-[#94a3b8] mt-5">
-          Need help? <a className="underline cursor-pointer font-medium" style={{ color: 'var(--brand)' }}>{settings?.footerContact || `support@${shop}`}</a>
-          <div className="mt-1.5 flex items-center justify-center gap-1.5 text-[11px] text-[#cbd5e1]">
-            <Icon name="Lock" size={11} /> {settings?.labelPoweredBy || 'Secured by ReturnFlow'}
+
+        {(isMinimal || isSidebar) ? null : isCompact ? (
+          <div className="text-center text-[11px] text-[#cbd5e1] mt-3 flex items-center justify-center gap-1.5">
+            <Icon name="Lock" size={10} /> {settings?.labelPoweredBy || 'Secured by TrackBack'}
           </div>
-        </div>
+        ) : (
+          <div className="text-center text-[12px] text-[#94a3b8] mt-5">
+            Need help? <a className="underline cursor-pointer font-medium" style={{ color: 'var(--brand)' }}>{settings?.footerContact || `support@${shop}`}</a>
+            <div className="mt-1.5 flex items-center justify-center gap-1.5 text-[11px] text-[#cbd5e1]">
+              <Icon name="Lock" size={11} /> {settings?.labelPoweredBy || 'Secured by TrackBack'}
+            </div>
+          </div>
+        )}
+      </PortalShell>
+      {chatEnabled && (
+        <ChatWidget
+          shop={shop}
+          brandColor={settings?.brandColor || '#6C63FF'}
+          storeName={settings?.portalStoreName || shop.split('.')[0]}
+          prefillEmail={chatPrefillEmail || undefined}
+          prefillName={chatPrefillName || undefined}
+          icon={(settings as any)?.liveChatIcon || 'MessageCircle'}
+        />
       )}
-    </PortalShell>
-    {chatEnabled && (
-      <ChatWidget
-        shop={shop}
-        brandColor={settings?.brandColor || '#6C63FF'}
-        storeName={settings?.portalStoreName || shop.split('.')[0]}
-        prefillEmail={chatPrefillEmail || undefined}
-        prefillName={chatPrefillName || undefined}
-        icon={(settings as any)?.liveChatIcon || 'MessageCircle'}
-      />
-    )}
     </>
   );
 }
@@ -789,11 +789,11 @@ function PortalShell({ children, settings, shop, steps, stepperCurrent }: {
   children: React.ReactNode; settings: any; shop: string; steps?: string[]; stepperCurrent?: number;
 }) {
   const layout = settings.portalLayout || 'classic';
-  const brand  = settings.brandColor ?? '#6C63FF';
-  const root   = { '--brand': brand } as React.CSSProperties;
+  const brand = settings.brandColor ?? '#6C63FF';
+  const root = { '--brand': brand } as React.CSSProperties;
 
   if (layout === 'minimal') return <ShellMinimal settings={settings} shop={shop} style={root}>{children}</ShellMinimal>;
-  if (layout === 'bold')    return <ShellBold    settings={settings} shop={shop} style={root}>{children}</ShellBold>;
+  if (layout === 'bold') return <ShellBold settings={settings} shop={shop} style={root}>{children}</ShellBold>;
   if (layout === 'sidebar') return <ShellSidebar settings={settings} shop={shop} style={root} steps={steps} stepperCurrent={stepperCurrent}>{children}</ShellSidebar>;
   if (layout === 'compact') return <ShellCompact settings={settings} shop={shop} style={root} steps={steps} stepperCurrent={stepperCurrent}>{children}</ShellCompact>;
   return <ShellClassic settings={settings} shop={shop} style={root}>{children}</ShellClassic>;
@@ -801,7 +801,7 @@ function PortalShell({ children, settings, shop, steps, stepperCurrent }: {
 
 function ShellClassic({ children, settings, shop, style }: any) {
   const storeName = settings.portalStoreName || shop.split('.')[0];
-  const headerBg  = settings.bannerColor || '#ffffff';
+  const headerBg = settings.bannerColor || '#ffffff';
   return (
     <div className="min-h-screen w-full font-sans" style={{ background: '#F7F8FB', color: '#0f1117', ...style }}>
       <header className="relative" style={{ background: headerBg, borderBottom: '1px solid #eef0f4' }}>
@@ -811,11 +811,11 @@ function ShellClassic({ children, settings, shop, style }: any) {
               <img src={settings.logoUrl} alt="Logo" className="h-9 w-auto object-contain" />
             ) : (
               <div className="w-10 h-10 rounded-[10px] grid place-content-center font-extrabold text-[15px]"
-                   style={{
-                     background: '#fff',
-                     color: 'var(--brand)',
-                     boxShadow: '0 0 0 1px color-mix(in srgb, var(--brand) 22%, transparent), 0 6px 18px -6px color-mix(in srgb, var(--brand) 45%, transparent)',
-                   }}>
+                style={{
+                  background: '#fff',
+                  color: 'var(--brand)',
+                  boxShadow: '0 0 0 1px color-mix(in srgb, var(--brand) 22%, transparent), 0 6px 18px -6px color-mix(in srgb, var(--brand) 45%, transparent)',
+                }}>
                 {storeName.charAt(0).toUpperCase()}
               </div>
             )}
@@ -825,12 +825,12 @@ function ShellClassic({ children, settings, shop, style }: any) {
             </div>
           </div>
           <a href={`https://${shop}`}
-             className="text-[12.5px] text-[#475569] hover:text-[#0f1117] flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[rgba(15,23,42,0.04)] hover:bg-[rgba(15,23,42,0.07)] transition-colors">
+            className="text-[12.5px] text-[#475569] hover:text-[#0f1117] flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[rgba(15,23,42,0.04)] hover:bg-[rgba(15,23,42,0.07)] transition-colors">
             <Icon name="ArrowLeft" size={13} /> {settings.labelBackToStore || 'Back to store'}
           </a>
         </div>
         <div className="absolute left-0 right-0 -bottom-px h-px"
-             style={{ background: 'linear-gradient(90deg, transparent, var(--brand), transparent)', opacity: 0.55 }} />
+          style={{ background: 'linear-gradient(90deg, transparent, var(--brand), transparent)', opacity: 0.55 }} />
       </header>
       <main className="max-w-3xl mx-auto px-5 sm:px-8 py-10">{children}</main>
     </div>
@@ -857,7 +857,7 @@ function ShellMinimal({ children, settings, shop, style }: any) {
         </div>
         <main className="pb-10">{children}</main>
         <div className="text-center text-[11px] text-[#cbd5e1] pb-8 flex items-center justify-center gap-1">
-          <Icon name="Lock" size={10} /> {settings.labelPoweredBy || 'Secured by ReturnFlow'}
+          <Icon name="Lock" size={10} /> {settings.labelPoweredBy || 'Secured by TrackBack'}
         </div>
       </div>
     </div>
@@ -869,15 +869,15 @@ function ShellBold({ children, settings, shop, style }: any) {
   return (
     <div className="min-h-screen w-full font-sans" style={{ background: '#F7F8FB', color: '#0f1117', ...style }}>
       <div className="relative overflow-hidden"
-           style={{
-             background: 'linear-gradient(135deg, var(--brand) 0%, color-mix(in srgb, var(--brand) 75%, #000) 100%)',
-             padding: '24px 24px 52px',
-           }}>
+        style={{
+          background: 'linear-gradient(135deg, var(--brand) 0%, color-mix(in srgb, var(--brand) 75%, #000) 100%)',
+          padding: '24px 24px 52px',
+        }}>
         {/* decorative bokeh */}
         <div className="absolute pointer-events-none"
-             style={{ top: -80, right: -60, width: 260, height: 260, borderRadius: '50%', background: 'rgba(255,255,255,0.10)', filter: 'blur(20px)' }} />
+          style={{ top: -80, right: -60, width: 260, height: 260, borderRadius: '50%', background: 'rgba(255,255,255,0.10)', filter: 'blur(20px)' }} />
         <div className="absolute pointer-events-none"
-             style={{ bottom: -70, left: -50, width: 200, height: 200, borderRadius: '50%', background: 'rgba(255,255,255,0.06)', filter: 'blur(12px)' }} />
+          style={{ bottom: -70, left: -50, width: 200, height: 200, borderRadius: '50%', background: 'rgba(255,255,255,0.06)', filter: 'blur(12px)' }} />
         <div className="relative max-w-3xl mx-auto">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
@@ -885,10 +885,10 @@ function ShellBold({ children, settings, shop, style }: any) {
                 <img src={settings.logoUrl} alt="Logo" className="h-8 w-auto object-contain brightness-[10]" />
               ) : (
                 <div className="w-10 h-10 rounded-[10px] grid place-content-center font-extrabold text-[15px] text-white"
-                     style={{
-                       background: 'rgba(255,255,255,0.18)',
-                       boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.25), 0 4px 14px -2px rgba(0,0,0,0.18)',
-                     }}>
+                  style={{
+                    background: 'rgba(255,255,255,0.18)',
+                    boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.25), 0 4px 14px -2px rgba(0,0,0,0.18)',
+                  }}>
                   {storeName.charAt(0).toUpperCase()}
                 </div>
               )}
@@ -898,8 +898,8 @@ function ShellBold({ children, settings, shop, style }: any) {
               </div>
             </div>
             <a href={`https://${shop}`}
-               className="text-[12px] text-white/85 hover:text-white flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-colors"
-               style={{ background: 'rgba(255,255,255,0.14)', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.18)' }}>
+              className="text-[12px] text-white/85 hover:text-white flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-colors"
+              style={{ background: 'rgba(255,255,255,0.14)', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.18)' }}>
               <Icon name="ArrowLeft" size={12} /> {settings.labelBackToStore || 'Back to store'}
             </a>
           </div>
@@ -913,9 +913,9 @@ function ShellBold({ children, settings, shop, style }: any) {
 }
 
 function ShellSidebar({ children, settings, shop, style, steps, stepperCurrent }: any) {
-  const storeName  = settings.portalStoreName || shop.split('.')[0];
-  const allSteps   = steps || ['Find Order', 'Select Items', 'Reason', 'Refund Type', 'Confirm'];
-  const current    = stepperCurrent || 1;
+  const storeName = settings.portalStoreName || shop.split('.')[0];
+  const allSteps = steps || ['Find Order', 'Select Items', 'Reason', 'Refund Type', 'Confirm'];
+  const current = stepperCurrent || 1;
   const currentLabel = allSteps[Math.min(current, allSteps.length) - 1];
 
   return (
@@ -928,10 +928,10 @@ function ShellSidebar({ children, settings, shop, style, steps, stepperCurrent }
               <img src={settings.logoUrl} alt="Logo" className="h-8 w-auto object-contain" />
             ) : (
               <div className="w-10 h-10 rounded-[10px] grid place-content-center text-white font-extrabold text-[15px]"
-                   style={{
-                     background: 'var(--brand)',
-                     boxShadow: '0 6px 16px -4px color-mix(in srgb, var(--brand) 55%, transparent)',
-                   }}>
+                style={{
+                  background: 'var(--brand)',
+                  boxShadow: '0 6px 16px -4px color-mix(in srgb, var(--brand) 55%, transparent)',
+                }}>
                 {storeName.charAt(0).toUpperCase()}
               </div>
             )}
@@ -944,23 +944,23 @@ function ShellSidebar({ children, settings, shop, style, steps, stepperCurrent }
           {/* Vertical step list */}
           <div className="space-y-0.5">
             {allSteps.map((label: string, i: number) => {
-              const idx  = i + 1;
+              const idx = i + 1;
               const done = idx < current;
               const curr = idx === current;
               return (
                 <div key={label}
-                     className="relative flex items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors"
-                     style={{ background: curr ? 'color-mix(in srgb, var(--brand) 9%, transparent)' : 'transparent' }}>
+                  className="relative flex items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors"
+                  style={{ background: curr ? 'color-mix(in srgb, var(--brand) 9%, transparent)' : 'transparent' }}>
                   {curr && (
                     <span className="absolute left-0 top-[22%] bottom-[22%] w-[2.5px] rounded-full"
-                          style={{ background: 'var(--brand)' }} />
+                      style={{ background: 'var(--brand)' }} />
                   )}
                   <div className="w-6 h-6 rounded-full grid place-content-center text-[10.5px] font-bold shrink-0 transition"
-                       style={{
-                         background: done ? 'var(--brand)' : curr ? '#0f1117' : '#f1f5f9',
-                         color: done || curr ? '#fff' : '#94a3b8',
-                         boxShadow: done ? '0 3px 8px -2px color-mix(in srgb, var(--brand) 45%, transparent)' : 'none',
-                       }}>
+                    style={{
+                      background: done ? 'var(--brand)' : curr ? '#0f1117' : '#f1f5f9',
+                      color: done || curr ? '#fff' : '#94a3b8',
+                      boxShadow: done ? '0 3px 8px -2px color-mix(in srgb, var(--brand) 45%, transparent)' : 'none',
+                    }}>
                     {done ? <Icon name="Check" size={11} strokeWidth={3} /> : idx}
                   </div>
                   <span className={`text-[12.5px] tracking-[-0.005em] ${curr ? 'font-bold text-[#0f1117]' : done ? 'font-medium text-[#475569]' : 'font-medium text-[#94a3b8]'}`}>{label}</span>
@@ -974,7 +974,7 @@ function ShellSidebar({ children, settings, shop, style, steps, stepperCurrent }
             <Icon name="ArrowLeft" size={12} /> {settings.labelBackToStore || 'Back to store'}
           </a>
           <div className="mt-3 text-[11px] text-[#cbd5e1] flex items-center gap-1">
-            <Icon name="Lock" size={10} /> {settings.labelPoweredBy || 'Secured by ReturnFlow'}
+            <Icon name="Lock" size={10} /> {settings.labelPoweredBy || 'Secured by TrackBack'}
           </div>
         </div>
       </aside>
@@ -1002,37 +1002,37 @@ function ShellSidebar({ children, settings, shop, style, steps, stepperCurrent }
 
 function ShellCompact({ children, settings, shop, style, steps, stepperCurrent }: any) {
   const storeName = settings.portalStoreName || shop.split('.')[0];
-  const headerBg  = settings.bannerColor || 'rgba(255,255,255,0.85)';
-  const total     = (steps || ['Find Order','Select Items','Reason','Refund Type','Confirm']).length;
-  const current   = stepperCurrent || 1;
-  const pct       = Math.min(100, Math.max(0, (current / total) * 100));
+  const headerBg = settings.bannerColor || 'rgba(255,255,255,0.85)';
+  const total = (steps || ['Find Order', 'Select Items', 'Reason', 'Refund Type', 'Confirm']).length;
+  const current = stepperCurrent || 1;
+  const pct = Math.min(100, Math.max(0, (current / total) * 100));
   return (
     <div className="min-h-screen w-full font-sans" style={{ background: '#fff', color: '#0f1117', ...style }}>
       {/* Top progress bar */}
       <div className="h-[3px] relative overflow-hidden" style={{ background: '#eef0f4' }}>
         <div className="absolute inset-y-0 left-0 transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]"
-             style={{
-               width: `${pct}%`,
-               background: 'linear-gradient(90deg, var(--brand), color-mix(in srgb, var(--brand) 65%, white))',
-             }} />
+          style={{
+            width: `${pct}%`,
+            background: 'linear-gradient(90deg, var(--brand), color-mix(in srgb, var(--brand) 65%, white))',
+          }} />
       </div>
       <header className="sticky top-0 z-10"
-              style={{
-                background: headerBg,
-                backdropFilter: 'blur(10px)',
-                WebkitBackdropFilter: 'blur(10px)',
-                borderBottom: '1px solid #eef0f4',
-              }}>
+        style={{
+          background: headerBg,
+          backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)',
+          borderBottom: '1px solid #eef0f4',
+        }}>
         <div className="max-w-2xl mx-auto px-4 h-12 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             {settings.logoUrl ? (
               <img src={settings.logoUrl} alt="Logo" className="h-7 w-auto object-contain" />
             ) : (
               <div className="w-7 h-7 rounded-[7px] grid place-content-center text-white font-extrabold text-[11px]"
-                   style={{
-                     background: 'var(--brand)',
-                     boxShadow: '0 3px 8px -2px color-mix(in srgb, var(--brand) 55%, transparent)',
-                   }}>
+                style={{
+                  background: 'var(--brand)',
+                  boxShadow: '0 3px 8px -2px color-mix(in srgb, var(--brand) 55%, transparent)',
+                }}>
                 {storeName.charAt(0).toUpperCase()}
               </div>
             )}
@@ -1062,30 +1062,28 @@ function Stepper({ steps, current, onJump }: any) {
           <React.Fragment key={s}>
             <button onClick={() => onJump(i)} className="flex items-center gap-2 group rf-press">
               <div className={`relative w-7 h-7 rounded-full grid place-content-center text-[12px] font-semibold
-                              transition-[background-color,color,border-color,transform,box-shadow] duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${
-                isDone ? 'text-white' : isCurr ? 'text-white scale-110' : 'text-[#aaa]'
-              }`} style={{
-                background: isDone ? 'var(--brand)' : isCurr ? '#0f1117' : '#fff',
-                border: isDone ? 'none' : isCurr ? 'none' : '1.5px solid #e2e5ec',
-                boxShadow: isCurr
-                  ? '0 0 0 4px color-mix(in srgb, var(--brand) 18%, transparent), 0 4px 14px -2px rgba(15,17,23,0.25)'
-                  : isDone
-                  ? '0 2px 8px -2px color-mix(in srgb, var(--brand) 40%, transparent)'
-                  : 'none',
-              }}>
+                              transition-[background-color,color,border-color,transform,box-shadow] duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] ${isDone ? 'text-white' : isCurr ? 'text-white scale-110' : 'text-[#aaa]'
+                }`} style={{
+                  background: isDone ? 'var(--brand)' : isCurr ? '#0f1117' : '#fff',
+                  border: isDone ? 'none' : isCurr ? 'none' : '1.5px solid #e2e5ec',
+                  boxShadow: isCurr
+                    ? '0 0 0 4px color-mix(in srgb, var(--brand) 18%, transparent), 0 4px 14px -2px rgba(15,17,23,0.25)'
+                    : isDone
+                      ? '0 2px 8px -2px color-mix(in srgb, var(--brand) 40%, transparent)'
+                      : 'none',
+                }}>
                 {isDone ? <Icon name="Check" size={13} strokeWidth={3} className="animate-popIn" /> : idx}
               </div>
-              <span className={`text-[12.5px] font-medium hidden sm:inline transition-colors ${
-                isCurr ? 'text-[#0f1117]' : isDone ? 'text-[#0f1117]' : 'text-[#aaa]'
-              }`}>{s}</span>
+              <span className={`text-[12.5px] font-medium hidden sm:inline transition-colors ${isCurr ? 'text-[#0f1117]' : isDone ? 'text-[#0f1117]' : 'text-[#aaa]'
+                }`}>{s}</span>
             </button>
             {i < steps.length - 1 && (
               <div className="flex-1 h-px relative overflow-hidden rounded-full" style={{ background: '#e6e6ec' }}>
                 <div className="absolute inset-y-0 left-0 transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]"
-                     style={{
-                       width: idx < current ? '100%' : '0%',
-                       background: 'linear-gradient(90deg, var(--brand), color-mix(in srgb, var(--brand) 70%, white))',
-                     }} />
+                  style={{
+                    width: idx < current ? '100%' : '0%',
+                    background: 'linear-gradient(90deg, var(--brand), color-mix(in srgb, var(--brand) 70%, white))',
+                  }} />
               </div>
             )}
           </React.Fragment>
@@ -1170,13 +1168,13 @@ function PortalCarrierField({ value, onChange }: { value: string; onChange: (v: 
 
 function PortalBtn({ variant = 'primary', children, full, onClick, disabled, icon, iconRight }: any) {
   const base = 'group inline-flex items-center justify-center gap-2 h-11 px-5 rounded-xl text-[13.5px] font-semibold ' +
-               'transition-[transform,box-shadow,background-color,color] duration-200 ease-out ' +
-               'disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.97]';
+    'transition-[transform,box-shadow,background-color,color] duration-200 ease-out ' +
+    'disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.97]';
   const map: Record<string, string> = {
     primary: 'text-white shadow-[0_1px_0_rgba(255,255,255,0.25)_inset,0_8px_22px_-6px_color-mix(in_srgb,var(--brand)_55%,transparent)] ' +
-             'hover:shadow-[0_1px_0_rgba(255,255,255,0.3)_inset,0_14px_30px_-6px_color-mix(in_srgb,var(--brand)_65%,transparent)] ' +
-             'hover:-translate-y-[1px]',
-    ghost:   'text-[#555] hover:text-[#111] bg-transparent hover:bg-[#f3f4f8]',
+      'hover:shadow-[0_1px_0_rgba(255,255,255,0.3)_inset,0_14px_30px_-6px_color-mix(in_srgb,var(--brand)_65%,transparent)] ' +
+      'hover:-translate-y-[1px]',
+    ghost: 'text-[#555] hover:text-[#111] bg-transparent hover:bg-[#f3f4f8]',
     outline: 'border border-[#e2e5ec] bg-white text-[#111] hover:bg-[#f8fafc] hover:border-[#c8cdd6]',
   };
   const style = variant === 'primary'
@@ -1220,8 +1218,8 @@ function StepFindOrder({ orderNum, setOrderNum, email, setEmail, onNext, canCont
         <p className="text-[13.5px] text-[#666] mt-2 max-w-xs mx-auto">Your carrier and tracking number have been saved. We'll update you when we receive your package.</p>
         {trackingUrl && (
           <a href={trackingUrl} target="_blank" rel="noopener noreferrer"
-             className="inline-flex items-center gap-2 mt-5 px-4 py-2.5 rounded-lg text-[13px] font-semibold transition"
-             style={{ background: 'var(--brand)', color: '#fff' }}>
+            className="inline-flex items-center gap-2 mt-5 px-4 py-2.5 rounded-lg text-[13px] font-semibold transition"
+            style={{ background: 'var(--brand)', color: '#fff' }}>
             <Icon name="ExternalLink" size={14} /> Track your package live
           </a>
         )}
@@ -1331,17 +1329,16 @@ function StepSelectItems({ items, orderName, date, isFulfilled, shopSettings, se
           const blocked = !!item.blocked;
           return (
             <label key={item.id}
-                   className={`flex items-center gap-4 p-4 rounded-xl border-2 transition-[border-color,background-color,transform,box-shadow] duration-200 ease-out ${
-                     blocked
-                       ? 'border-[#e6e6ec] opacity-50 cursor-not-allowed'
-                       : 'cursor-pointer hover:border-[#cfd3dc] hover:bg-[#fafbfc]'
-                   } ${!blocked && sel ? 'shadow-[0_2px_12px_-4px_color-mix(in_srgb,var(--brand)_30%,transparent)]' : ''}`}
-                   style={!blocked && sel
-                     ? { borderColor: 'var(--brand)', background: 'color-mix(in srgb, var(--brand) 5%, white)' }
-                     : !blocked ? { borderColor: '#e6e6ec' } : {}}>
+              className={`flex items-center gap-4 p-4 rounded-xl border-2 transition-[border-color,background-color,transform,box-shadow] duration-200 ease-out ${blocked
+                  ? 'border-[#e6e6ec] opacity-50 cursor-not-allowed'
+                  : 'cursor-pointer hover:border-[#cfd3dc] hover:bg-[#fafbfc]'
+                } ${!blocked && sel ? 'shadow-[0_2px_12px_-4px_color-mix(in_srgb,var(--brand)_30%,transparent)]' : ''}`}
+              style={!blocked && sel
+                ? { borderColor: 'var(--brand)', background: 'color-mix(in srgb, var(--brand) 5%, white)' }
+                : !blocked ? { borderColor: '#e6e6ec' } : {}}>
               <input type="checkbox" checked={sel} onChange={() => toggleItem(item.id, blocked)} className="sr-only" disabled={blocked} />
               <div className={`w-5 h-5 rounded-md grid place-content-center shrink-0 transition`}
-                   style={blocked ? { background: '#e6e6ec' } : sel ? { background: 'var(--brand)' } : { background: '#fff', border: '2px solid #d8dce5' }}>
+                style={blocked ? { background: '#e6e6ec' } : sel ? { background: 'var(--brand)' } : { background: '#fff', border: '2px solid #d8dce5' }}>
                 {blocked ? <Icon name="Ban" size={11} className="text-[#999]" /> : sel && <Icon name="Check" size={12} className="text-white" strokeWidth={3.5} />}
               </div>
               <div className="w-16 h-16 rounded-lg grid place-content-center shrink-0 border border-[#e6e6ec] bg-[#f8fafc] overflow-hidden">
@@ -1433,27 +1430,27 @@ function StepReasons({ itemsList, reasons, setReasons, notes, setNotes, onBack, 
 
 function StepRefundType({ availableRefundTypes, refundType, setRefundType, exchangeNote, setExchangeNote, totalRefund, shopSettings, onBack, onNext, canContinue, totalSteps }: any) {
   const showBonus = shopSettings.incentivizeStoreCredit && shopSettings.storeCreditBonusPercent > 0;
-  const bonusPct  = shopSettings.storeCreditBonusPercent;
+  const bonusPct = shopSettings.storeCreditBonusPercent;
   const bonusAmount = totalRefund * (bonusPct / 100);
 
   const OPTIONS: Record<string, any> = {
     ORIGINAL_PAYMENT: {
       icon: 'CreditCard',
       title: 'Refund to original payment',
-      desc:  'Refunded to your original payment method within 5–10 business days.',
+      desc: 'Refunded to your original payment method within 5–10 business days.',
       badge: null,
     },
     STORE_CREDIT: {
       icon: 'Gift',
       title: 'Store credit',
-      desc:  'Get store credit to use on your next purchase. Available instantly.',
+      desc: 'Get store credit to use on your next purchase. Available instantly.',
       badge: { icon: 'Zap', label: 'Instant', kind: 'accent' },
       bonusBadge: showBonus ? { label: `+${bonusPct}% bonus credit`, amount: `Get $${(totalRefund + bonusAmount).toFixed(2)} instead of $${totalRefund.toFixed(2)}` } : null,
     },
     EXCHANGE: {
       icon: 'RefreshCw',
       title: 'Exchange for another item',
-      desc:  "We'll send you a replacement once we receive your return.",
+      desc: "We'll send you a replacement once we receive your return.",
       badge: { icon: 'Star', label: 'Recommended', kind: 'info' },
     },
   };
@@ -1470,29 +1467,29 @@ function StepRefundType({ availableRefundTypes, refundType, setRefundType, excha
           const selected = refundType === key;
           return (
             <button key={key}
-                    role="radio"
-                    aria-checked={selected}
-                    tabIndex={0}
-                    onClick={() => setRefundType(key)}
-                    className={`w-full text-left p-4 rounded-xl border-2 relative group cursor-pointer focus:outline-none
+              role="radio"
+              aria-checked={selected}
+              tabIndex={0}
+              onClick={() => setRefundType(key)}
+              className={`w-full text-left p-4 rounded-xl border-2 relative group cursor-pointer focus:outline-none
                                 transition-[border-color,background-color,transform,box-shadow] duration-200 ease-out
                                 active:scale-[0.995] hover:-translate-y-[1px]
                                 ${selected
-                                  ? 'shadow-[0_4px_16px_-4px_color-mix(in_srgb,var(--brand)_30%,transparent)]'
-                                  : 'hover:border-[#cfd3dc] hover:bg-[#fafbfc]'}`}
-                    style={selected
-                      ? { borderColor: 'var(--brand)', background: 'color-mix(in srgb, var(--brand) 5%, #fff)' }
-                      : { borderColor: '#e6e6ec', background: '#fff' }}>
+                  ? 'shadow-[0_4px_16px_-4px_color-mix(in_srgb,var(--brand)_30%,transparent)]'
+                  : 'hover:border-[#cfd3dc] hover:bg-[#fafbfc]'}`}
+              style={selected
+                ? { borderColor: 'var(--brand)', background: 'color-mix(in srgb, var(--brand) 5%, #fff)' }
+                : { borderColor: '#e6e6ec', background: '#fff' }}>
               {selected && (
                 <div className="absolute top-3 right-3 w-6 h-6 rounded-full grid place-content-center"
-                     style={{ background: 'var(--brand)' }}>
+                  style={{ background: 'var(--brand)' }}>
                   <Icon name="Check" size={13} strokeWidth={3.5} className="text-white" />
                 </div>
               )}
 
               <div className="flex items-start gap-4">
                 <div className="w-11 h-11 rounded-lg grid place-content-center shrink-0 transition-colors"
-                     style={{ background: selected ? 'var(--brand)' : '#f0f0f5', color: selected ? '#fff' : '#444' }}>
+                  style={{ background: selected ? 'var(--brand)' : '#f0f0f5', color: selected ? '#fff' : '#444' }}>
                   <Icon name={opt.icon} size={18} />
                 </div>
 
@@ -1501,26 +1498,26 @@ function StepRefundType({ availableRefundTypes, refundType, setRefundType, excha
                     <span className="text-[14.5px] font-bold text-[#0f1117]">{opt.title}</span>
                     {opt.badge && (
                       <span className="inline-flex items-center gap-1 text-[10.5px] font-bold px-2 py-0.5 rounded-full tracking-wide"
-                            style={opt.badge.kind === 'accent'
-                              ? { background: 'var(--brand)', color: 'white' }
-                              : { background: '#3B82F615', color: '#3B82F6' }}>
+                        style={opt.badge.kind === 'accent'
+                          ? { background: 'var(--brand)', color: 'white' }
+                          : { background: '#3B82F615', color: '#3B82F6' }}>
                         <Icon name={opt.badge.icon} size={10} strokeWidth={2.5} />
                         {opt.badge.label}
                       </span>
                     )}
                     {key === 'STORE_CREDIT' && opt.bonusBadge && (
                       <span className="text-[10.5px] font-bold px-2 py-0.5 rounded-full"
-                            style={{ background: 'linear-gradient(90deg,#F59E0B,#EF4444)', color: 'white' }}>
+                        style={{ background: 'linear-gradient(90deg,#F59E0B,#EF4444)', color: 'white' }}>
                         {opt.bonusBadge.label}
                       </span>
                     )}
                   </div>
                   <div className="text-[12.5px] text-[#666] mt-1 leading-relaxed">{opt.desc}</div>
                   {key === 'STORE_CREDIT' && opt.bonusBadge && (
-                     <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11.5px] font-semibold"
-                          style={{ background: 'color-mix(in srgb, var(--brand) 10%, transparent)', color: 'var(--brand)' }}>
-                       <Icon name="Sparkles" size={11} /> {opt.bonusBadge.amount}
-                     </div>
+                    <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11.5px] font-semibold"
+                      style={{ background: 'color-mix(in srgb, var(--brand) 10%, transparent)', color: 'var(--brand)' }}>
+                      <Icon name="Sparkles" size={11} /> {opt.bonusBadge.amount}
+                    </div>
                   )}
                 </div>
               </div>
@@ -1610,11 +1607,11 @@ function StepConfirm({ itemsList, selectedItems, reasons, notes, totalRefund, on
         <div className="mt-3 pt-3 border-t border-[#e6e6ec] flex items-center justify-between gap-3">
           <span className="text-[12px] text-[#666] font-medium">Refund method</span>
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[12px] font-semibold"
-                style={{ background: meta.bg, color: meta.color }}>
+            style={{ background: meta.bg, color: meta.color }}>
             <Icon name={meta.icon} size={12} />
             {refundType === 'ORIGINAL_PAYMENT' && 'Refund to original payment (5–10 days)'}
-            {refundType === 'STORE_CREDIT'     && `Store credit · $${(showBonus ? creditTotal : totalRefund).toFixed(2)}`}
-            {refundType === 'EXCHANGE'         && 'Exchange · item selection after submission'}
+            {refundType === 'STORE_CREDIT' && `Store credit · $${(showBonus ? creditTotal : totalRefund).toFixed(2)}`}
+            {refundType === 'EXCHANGE' && 'Exchange · item selection after submission'}
           </span>
         </div>
       </div>
@@ -1635,17 +1632,17 @@ function PortalConfirmation({ rma, email, refundType, settings, onReset }: any) 
 
   const steps = isExchange
     ? [
-        'Your exchange request is being reviewed by our team.',
-        `Once approved, you'll receive a prepaid shipping label at ${email}.`,
-        "Ship the item back and we'll send your replacement once received.",
-      ]
+      'Your exchange request is being reviewed by our team.',
+      `Once approved, you'll receive a prepaid shipping label at ${email}.`,
+      "Ship the item back and we'll send your replacement once received.",
+    ]
     : isStoreCredit
-    ? [
+      ? [
         'Your request will be reviewed by our team.',
         `Once approved, you'll receive a prepaid shipping label at ${email}.`,
         'Your store credit code will be emailed as soon as we receive your item.',
       ]
-    : [
+      : [
         'Your request will be reviewed by our team.',
         `Once approved, you'll receive a prepaid shipping label at ${email}.`,
         'Once received, your refund is issued within 3–5 business days.',
@@ -1655,10 +1652,10 @@ function PortalConfirmation({ rma, email, refundType, settings, onReset }: any) 
   return (
     <div className="text-center max-w-md mx-auto py-6 animate-fadeIn">
       <div className="w-20 h-20 rounded-full grid place-content-center mx-auto mb-5 relative animate-popIn"
-           style={{ background: `${accent}15` }}>
+        style={{ background: `${accent}15` }}>
         <div className="absolute inset-0 rounded-full animate-ping" style={{ background: `${accent}22` }} />
         <div className="absolute inset-[-6px] rounded-full opacity-40"
-             style={{ boxShadow: `0 0 0 6px ${accent}10, 0 0 0 14px ${accent}06` }} />
+          style={{ boxShadow: `0 0 0 6px ${accent}10, 0 0 0 14px ${accent}06` }} />
         <Icon name={isExchange ? 'RefreshCw' : 'Check'} size={32} strokeWidth={3.5} style={{ color: accent }} className="relative" />
       </div>
       <h2 className="text-[24px] font-bold text-[#0f1117] tracking-tight">
@@ -1672,13 +1669,13 @@ function PortalConfirmation({ rma, email, refundType, settings, onReset }: any) 
 
       <div className="mt-6 p-5 rounded-2xl bg-white border border-[#e6e6ec] text-left
                       shadow-[0_2px_12px_rgba(15,17,23,0.04)] animate-slideUp"
-           style={{ animationDelay: '120ms' }}>
+        style={{ animationDelay: '120ms' }}>
         <div className="text-[11.5px] uppercase tracking-wider text-[#888] font-semibold">Your RMA</div>
         <div className="flex items-center gap-2 mt-1">
           <div className="text-[20px] font-bold text-[#0f1117] font-mono">{rma}</div>
           <button onClick={() => navigator.clipboard?.writeText(rma)}
-                  className="ml-auto p-1.5 text-[#888] hover:text-[#0f1117] hover:bg-[#f3f4f8] rounded-md transition-colors"
-                  title="Copy RMA">
+            className="ml-auto p-1.5 text-[#888] hover:text-[#0f1117] hover:bg-[#f3f4f8] rounded-md transition-colors"
+            title="Copy RMA">
             <Icon name="Copy" size={13} />
           </button>
         </div>
@@ -1687,7 +1684,7 @@ function PortalConfirmation({ rma, email, refundType, settings, onReset }: any) 
             <div key={i} className="flex gap-3 items-start">
               <div className="w-6 h-6 rounded-full grid place-content-center shrink-0 text-white text-[10px] font-bold
                               shadow-[0_2px_8px_-2px_color-mix(in_srgb,var(--brand)_40%,transparent)]"
-                   style={{ background: 'linear-gradient(135deg, color-mix(in srgb, var(--brand) 88%, white), var(--brand))' }}>
+                style={{ background: 'linear-gradient(135deg, color-mix(in srgb, var(--brand) 88%, white), var(--brand))' }}>
                 {i + 1}
               </div>
               <div className="text-[#444] leading-relaxed">{step}</div>
@@ -1697,8 +1694,8 @@ function PortalConfirmation({ rma, email, refundType, settings, onReset }: any) 
       </div>
 
       <button onClick={onReset}
-              className="group mt-6 inline-flex items-center gap-1.5 text-[13px] font-semibold hover:gap-2 transition-all"
-              style={{ color: 'var(--brand)' }}>
+        className="group mt-6 inline-flex items-center gap-1.5 text-[13px] font-semibold hover:gap-2 transition-all"
+        style={{ color: 'var(--brand)' }}>
         {settings?.labelStartAnother || 'Start another return'}
         <Icon name="ArrowRight" size={13} className="transition-transform group-hover:translate-x-0.5" />
       </button>

@@ -112,7 +112,7 @@ export async function sendReturnEmail(
     let brandColor = "#6C63FF";
     let logoUrl: string | null = null;
     let storeName = data.shop?.split(".")[0] ?? "Store";
-    let poweredBy = "Secured by ReturnFlow";
+    let poweredBy = "Secured by TrackBack";
 
     if (data.shop) {
       const [dbTemplate, settings] = await Promise.all([

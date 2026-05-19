@@ -1,8 +1,8 @@
 import crypto from "crypto";
 
 const CLOUD = process.env.CLOUDINARY_CLOUD_NAME!;
-const KEY   = process.env.CLOUDINARY_API_KEY!;
-const SEC   = process.env.CLOUDINARY_API_SECRET!;
+const KEY = process.env.CLOUDINARY_API_KEY!;
+const SEC = process.env.CLOUDINARY_API_SECRET!;
 
 function sign(params: Record<string, string>): string {
   const str = Object.keys(params).sort()
@@ -13,7 +13,7 @@ function sign(params: Record<string, string>): string {
 
 export async function uploadToCloudinary(
   base64Data: string,
-  folder = "returnflow"
+  folder = "trackback"
 ): Promise<{ url: string; publicId: string }> {
   const timestamp = String(Math.floor(Date.now() / 1000));
   const sig = sign({ folder, timestamp });

@@ -97,20 +97,20 @@ export default function App() {
       <ToastProvider>
         {/* Global Loading Bar — gradient + glow */}
         <div className="fixed top-0 left-0 right-0 h-[2px] z-[9999] pointer-events-none overflow-hidden"
-             style={{ opacity: isLoading ? 1 : 0, transition: 'opacity 0.25s ease' }}>
+          style={{ opacity: isLoading ? 1 : 0, transition: 'opacity 0.25s ease' }}>
           <div className="h-full relative"
-               style={{
-                 width: isLoading ? '72%' : '100%',
-                 background: 'linear-gradient(90deg, #6C63FF 0%, #8B5CF6 50%, #6C63FF 100%)',
-                 transition: 'width 2s cubic-bezier(0.1, 0.8, 0.3, 1)',
-                 boxShadow: '0 0 12px rgba(108,99,255,0.6), 0 0 24px rgba(139,92,246,0.4)',
-               }}>
+            style={{
+              width: isLoading ? '72%' : '100%',
+              background: 'linear-gradient(90deg, #6C63FF 0%, #8B5CF6 50%, #6C63FF 100%)',
+              transition: 'width 2s cubic-bezier(0.1, 0.8, 0.3, 1)',
+              boxShadow: '0 0 12px rgba(108,99,255,0.6), 0 0 24px rgba(139,92,246,0.4)',
+            }}>
             <div className="absolute inset-0 opacity-60"
-                 style={{
-                   background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.5), transparent)',
-                   backgroundSize: '200% 100%',
-                   animation: 'shimmer 1.4s linear infinite',
-                 }} />
+              style={{
+                background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.5), transparent)',
+                backgroundSize: '200% 100%',
+                animation: 'shimmer 1.4s linear infinite',
+              }} />
           </div>
         </div>
         {/* Theme toggle — top-right corner */}
@@ -123,17 +123,17 @@ export default function App() {
           <main className="flex-1 min-w-0 bg-bg h-screen overflow-y-auto relative">
             {/* Soft ambient gradient behind content */}
             <div className="pointer-events-none absolute top-0 left-0 right-0 h-[400px]"
-                 style={{
-                   background: 'radial-gradient(ellipse 80% 50% at 20% 0%, rgba(108,99,255,0.08), transparent 60%), radial-gradient(ellipse 60% 40% at 90% 0%, rgba(139,92,246,0.06), transparent 60%)',
-                 }} />
+              style={{
+                background: 'radial-gradient(ellipse 80% 50% at 20% 0%, rgba(108,99,255,0.08), transparent 60%), radial-gradient(ellipse 60% 40% at 90% 0%, rgba(139,92,246,0.06), transparent 60%)',
+              }} />
 
             {/* Top bar (mobile) */}
             <div className="md:hidden flex items-center gap-3 h-14 px-4 border-b border-divider bg-surface relative z-10">
               <div className="w-7 h-7 rounded-md grid place-content-center text-white shadow-[0_4px_14px_-2px_rgba(108,99,255,0.5)]"
-                   style={{ background: 'linear-gradient(135deg,#6C63FF,#8B5CF6)' }}>
+                style={{ background: 'linear-gradient(135deg,#6C63FF,#8B5CF6)' }}>
                 <Icon name="RefreshCcw" size={14} strokeWidth={2.5} />
               </div>
-              <div className="font-semibold text-[15px] tracking-tight">ReturnFlow</div>
+              <div className="font-semibold text-[15px] tracking-tight">TrackBack</div>
             </div>
 
             <div className="px-6 md:px-10 py-8 max-w-[1280px] mx-auto relative z-10 animate-fadeIn">

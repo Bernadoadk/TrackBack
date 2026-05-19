@@ -3,5 +3,5 @@ uid = "e8b27fcc-79e9-97be-bb6e-f4b9ff6f32de1c30314c"
 
 [[extensions]]
 type = "theme"
-name = "ReturnFlow — Return Button"
-handle = "returnflow-return-button"
+name = "TrackBack — Return Button"
+handle = "TrackBack-return-button"

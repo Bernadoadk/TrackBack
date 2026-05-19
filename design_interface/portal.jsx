@@ -2,10 +2,10 @@
 function PortalPage({ onExit, shopSettings = DEFAULT_SHOP_SETTINGS }) {
   const [step, setStep] = useState(1);
   const [orderNum, setOrderNum] = useState('');
-  const [email,    setEmail]    = useState('');
+  const [email, setEmail] = useState('');
   const [selectedItems, setSelectedItems] = useState({}); // id -> { qty }
-  const [reasons,  setReasons]  = useState({});  // id -> reason
-  const [notes,    setNotes]    = useState({});  // id -> note
+  const [reasons, setReasons] = useState({});  // id -> reason
+  const [notes, setNotes] = useState({});  // id -> note
   const [refundType, setRefundType] = useState('ORIGINAL_PAYMENT');
   const [submitted, setSubmitted] = useState(false);
 
@@ -13,7 +13,7 @@ function PortalPage({ onExit, shopSettings = DEFAULT_SHOP_SETTINGS }) {
   const availableRefundTypes = useMemo(() => {
     const list = ['ORIGINAL_PAYMENT'];
     if (shopSettings.allowStoreCredit) list.push('STORE_CREDIT');
-    if (shopSettings.allowExchanges)   list.push('EXCHANGE');
+    if (shopSettings.allowExchanges) list.push('EXCHANGE');
     return list;
   }, [shopSettings.allowStoreCredit, shopSettings.allowExchanges]);
 
@@ -24,7 +24,7 @@ function PortalPage({ onExit, shopSettings = DEFAULT_SHOP_SETTINGS }) {
     : ['Find Order', 'Select Items', 'Reason', 'Confirm'];
 
   const confirmStep = STEPS.length;          // last step index
-  const refundStep  = showRefundStep ? 4 : null;
+  const refundStep = showRefundStep ? 4 : null;
 
   const itemsList = Object.entries(selectedItems).filter(([_, v]) => v.qty > 0)
     .map(([id]) => PORTAL_ORDER.items.find(i => i.id === id));
@@ -74,17 +74,17 @@ function PortalPage({ onExit, shopSettings = DEFAULT_SHOP_SETTINGS }) {
       <div className="bg-white rounded-2xl border border-[#e6e6ec] shadow-[0_4px_24px_rgba(15,17,23,0.06)] p-6 sm:p-8 mt-6">
         {step === 1 && (
           <StepFindOrder orderNum={orderNum} setOrderNum={setOrderNum} email={email} setEmail={setEmail}
-                         onNext={() => canContinue[1] && go(2)} canContinue={canContinue[1]} />
+            onNext={() => canContinue[1] && go(2)} canContinue={canContinue[1]} />
         )}
         {step === 2 && (
           <StepSelectItems selectedItems={selectedItems} setSelectedItems={setSelectedItems}
-                           onBack={() => go(1)} onNext={() => canContinue[2] && go(3)} canContinue={canContinue[2]} />
+            onBack={() => go(1)} onNext={() => canContinue[2] && go(3)} canContinue={canContinue[2]} />
         )}
         {step === 3 && (
           <StepReasons itemsList={itemsList} reasons={reasons} setReasons={setReasons}
-                       notes={notes} setNotes={setNotes}
-                       totalSteps={STEPS.length}
-                       onBack={() => go(prevFrom(3))} onNext={() => canContinue[3] && go(nextFrom(3))} canContinue={canContinue[3]} />
+            notes={notes} setNotes={setNotes}
+            totalSteps={STEPS.length}
+            onBack={() => go(prevFrom(3))} onNext={() => canContinue[3] && go(nextFrom(3))} canContinue={canContinue[3]} />
         )}
         {step === 4 && showRefundStep && (
           <StepRefundType
@@ -97,17 +97,17 @@ function PortalPage({ onExit, shopSettings = DEFAULT_SHOP_SETTINGS }) {
         )}
         {step === confirmStep && (
           <StepConfirm itemsList={itemsList} selectedItems={selectedItems} reasons={reasons} notes={notes}
-                       totalRefund={totalRefund} orderNum={orderNum} email={email}
-                       refundType={refundType} shopSettings={shopSettings}
-                       totalSteps={STEPS.length}
-                       onBack={() => go(prevFrom(confirmStep))} onSubmit={() => setSubmitted(true)} />
+            totalRefund={totalRefund} orderNum={orderNum} email={email}
+            refundType={refundType} shopSettings={shopSettings}
+            totalSteps={STEPS.length}
+            onBack={() => go(prevFrom(confirmStep))} onSubmit={() => setSubmitted(true)} />
         )}
       </div>
 
       <div className="text-center text-[12px] text-[#888] mt-6">
         Need help? Email <a className="underline" style={{ color: '#6C63FF' }}>support@acmestore.com</a>
         <div className="mt-1.5 flex items-center justify-center gap-1.5 text-[11px] text-[#aaa]">
-          <Icon name="Lock" size={11} /> Secured by ReturnFlow
+          <Icon name="Lock" size={11} /> Secured by TrackBack
         </div>
       </div>
     </PortalShell>
@@ -122,7 +122,7 @@ function PortalShell({ children, onExit }) {
         <div className="max-w-3xl mx-auto px-5 sm:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-md grid place-content-center text-white font-bold"
-                 style={{ background: 'linear-gradient(135deg,#6C63FF,#8B5CF6)', boxShadow: '0 4px 14px rgba(108,99,255,0.35)' }}>A</div>
+              style={{ background: 'linear-gradient(135deg,#6C63FF,#8B5CF6)', boxShadow: '0 4px 14px rgba(108,99,255,0.35)' }}>A</div>
             <div>
               <div className="text-[15px] font-semibold leading-tight">Acme Store</div>
               <div className="text-[11.5px] text-[#888]">Return Center</div>
@@ -149,12 +149,11 @@ function Stepper({ steps, current, onJump }) {
         return (
           <React.Fragment key={s}>
             <button onClick={() => onJump(i)} className="flex items-center gap-2 group">
-              <div className={`w-7 h-7 rounded-full grid place-content-center text-[12px] font-semibold transition ${
-                isDone ? 'text-white' : isCurr ? 'text-white' : 'text-[#aaa]'
-              }`} style={{
-                background: isDone ? '#6C63FF' : isCurr ? '#0f1117' : '#fff',
-                border: isDone ? 'none' : isCurr ? 'none' : '1.5px solid #d8dce5'
-              }}>
+              <div className={`w-7 h-7 rounded-full grid place-content-center text-[12px] font-semibold transition ${isDone ? 'text-white' : isCurr ? 'text-white' : 'text-[#aaa]'
+                }`} style={{
+                  background: isDone ? '#6C63FF' : isCurr ? '#0f1117' : '#fff',
+                  border: isDone ? 'none' : isCurr ? 'none' : '1.5px solid #d8dce5'
+                }}>
                 {isDone ? <Icon name="Check" size={13} strokeWidth={3} /> : idx}
               </div>
               <span className={`text-[12.5px] font-medium hidden sm:inline ${isCurr ? 'text-[#0f1117]' : isDone ? 'text-[#0f1117]' : 'text-[#aaa]'}`}>{s}</span>
@@ -244,17 +243,15 @@ function StepSelectItems({ selectedItems, setSelectedItems, onBack, onNext, canC
           const qty = selectedItems[item.id]?.qty || 1;
           return (
             <label key={item.id}
-                   className={`flex items-center gap-4 p-4 rounded-xl border-2 cursor-pointer transition ${
-                     sel ? 'border-[#6C63FF] bg-[#6C63FF]/[0.04]' : 'border-[#e6e6ec] hover:border-[#cfd3df]'
-                   }`}>
+              className={`flex items-center gap-4 p-4 rounded-xl border-2 cursor-pointer transition ${sel ? 'border-[#6C63FF] bg-[#6C63FF]/[0.04]' : 'border-[#e6e6ec] hover:border-[#cfd3df]'
+                }`}>
               <input type="checkbox" checked={sel} onChange={() => toggleItem(item.id)} className="sr-only" />
-              <div className={`w-5 h-5 rounded-md grid place-content-center shrink-0 transition ${
-                sel ? 'bg-[#6C63FF]' : 'bg-white border-2 border-[#d8dce5]'
-              }`}>
+              <div className={`w-5 h-5 rounded-md grid place-content-center shrink-0 transition ${sel ? 'bg-[#6C63FF]' : 'bg-white border-2 border-[#d8dce5]'
+                }`}>
                 {sel && <Icon name="Check" size={12} className="text-white" strokeWidth={3.5} />}
               </div>
               <div className="w-16 h-16 rounded-lg grid place-content-center shrink-0 border border-[#e6e6ec]"
-                   style={{ background: item.color }}>
+                style={{ background: item.color }}>
                 <Icon name="Shirt" size={22} className="text-black/30" />
               </div>
               <div className="flex-1 min-w-0">
@@ -335,30 +332,30 @@ function StepReasons({ itemsList, reasons, setReasons, notes, setNotes, onBack, 
 
 function StepRefundType({ availableRefundTypes, refundType, setRefundType, totalRefund, shopSettings, onBack, onNext, canContinue, totalSteps = 5 }) {
   const showBonus = shopSettings.incentivizeStoreCredit && shopSettings.storeCreditBonusPercent > 0;
-  const bonusPct  = shopSettings.storeCreditBonusPercent;
+  const bonusPct = shopSettings.storeCreditBonusPercent;
   const bonusAmount = totalRefund * (bonusPct / 100);
 
   const OPTIONS = {
     ORIGINAL_PAYMENT: {
       icon: 'CreditCard',
       title: 'Refund to original payment',
-      desc:  'Refunded to your original payment method within 5–10 business days.',
+      desc: 'Refunded to your original payment method within 5–10 business days.',
       badge: null,
-      foot:  null,
+      foot: null,
     },
     STORE_CREDIT: {
       icon: 'Gift',
       title: 'Store credit',
-      desc:  'Get store credit to use on your next purchase. Available instantly.',
+      desc: 'Get store credit to use on your next purchase. Available instantly.',
       badge: { label: '⚡ Instant', kind: 'accent' },
       bonusBadge: showBonus ? { label: `+${bonusPct}% bonus credit`, amount: `Get $${(totalRefund + bonusAmount).toFixed(2)} instead of $${totalRefund.toFixed(2)}` } : null,
     },
     EXCHANGE: {
       icon: 'RefreshCw',
       title: 'Exchange for another item',
-      desc:  "We'll send you a replacement once we receive your return.",
+      desc: "We'll send you a replacement once we receive your return.",
       badge: { label: '🔄 Recommended', kind: 'info' },
-      foot:  "You'll select your replacement item after submitting.",
+      foot: "You'll select your replacement item after submitting.",
     },
   };
 
@@ -374,28 +371,26 @@ function StepRefundType({ availableRefundTypes, refundType, setRefundType, total
           const selected = refundType === key;
           return (
             <button key={key}
-                    role="radio"
-                    aria-checked={selected}
-                    tabIndex={0}
-                    onClick={() => setRefundType(key)}
-                    onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setRefundType(key); } }}
-                    className={`w-full text-left p-4 rounded-xl border-2 transition-all duration-150 relative group cursor-pointer focus:outline-none focus-visible:ring-4 focus-visible:ring-[#6C63FF]/20 ${
-                      selected
-                        ? 'border-[#6C63FF] bg-[#6C63FF]/[0.04]'
-                        : 'border-[#e6e6ec] bg-white hover:border-[#cfd3df]'
-                    }`}>
+              role="radio"
+              aria-checked={selected}
+              tabIndex={0}
+              onClick={() => setRefundType(key)}
+              onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setRefundType(key); } }}
+              className={`w-full text-left p-4 rounded-xl border-2 transition-all duration-150 relative group cursor-pointer focus:outline-none focus-visible:ring-4 focus-visible:ring-[#6C63FF]/20 ${selected
+                  ? 'border-[#6C63FF] bg-[#6C63FF]/[0.04]'
+                  : 'border-[#e6e6ec] bg-white hover:border-[#cfd3df]'
+                }`}>
               {/* Selected check */}
               {selected && (
                 <div className="absolute top-3 right-3 w-6 h-6 rounded-full grid place-content-center shadow-[0_2px_8px_rgba(108,99,255,0.4)]"
-                     style={{ background: '#6C63FF' }}>
+                  style={{ background: '#6C63FF' }}>
                   <Icon name="Check" size={13} strokeWidth={3.5} className="text-white" />
                 </div>
               )}
 
               <div className="flex items-start gap-4">
-                <div className={`w-11 h-11 rounded-lg grid place-content-center shrink-0 transition-colors ${
-                  selected ? 'text-white' : 'text-[#444]'
-                }`} style={{ background: selected ? '#6C63FF' : '#f0f0f5' }}>
+                <div className={`w-11 h-11 rounded-lg grid place-content-center shrink-0 transition-colors ${selected ? 'text-white' : 'text-[#444]'
+                  }`} style={{ background: selected ? '#6C63FF' : '#f0f0f5' }}>
                   <Icon name={opt.icon} size={18} />
                 </div>
 
@@ -404,15 +399,15 @@ function StepRefundType({ availableRefundTypes, refundType, setRefundType, total
                     <span className="text-[14.5px] font-bold text-[#0f1117]">{opt.title}</span>
                     {opt.badge && (
                       <span className="text-[10.5px] font-bold px-2 py-0.5 rounded-full tracking-wide"
-                            style={opt.badge.kind === 'accent'
-                              ? { background: '#6C63FF', color: 'white' }
-                              : { background: '#3B82F615', color: '#3B82F6' }}>
+                        style={opt.badge.kind === 'accent'
+                          ? { background: '#6C63FF', color: 'white' }
+                          : { background: '#3B82F615', color: '#3B82F6' }}>
                         {opt.badge.label}
                       </span>
                     )}
                     {key === 'STORE_CREDIT' && opt.bonusBadge && (
                       <span className="text-[10.5px] font-bold px-2 py-0.5 rounded-full"
-                            style={{ background: 'linear-gradient(90deg,#F59E0B,#EF4444)', color: 'white' }}>
+                        style={{ background: 'linear-gradient(90deg,#F59E0B,#EF4444)', color: 'white' }}>
                         {opt.bonusBadge.label}
                       </span>
                     )}
@@ -420,7 +415,7 @@ function StepRefundType({ availableRefundTypes, refundType, setRefundType, total
                   <div className="text-[12.5px] text-[#666] mt-1 leading-relaxed">{opt.desc}</div>
                   {key === 'STORE_CREDIT' && opt.bonusBadge && (
                     <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11.5px] font-semibold"
-                         style={{ background: 'rgba(108,99,255,0.10)', color: '#6C63FF' }}>
+                      style={{ background: 'rgba(108,99,255,0.10)', color: '#6C63FF' }}>
                       <Icon name="Sparkles" size={11} /> {opt.bonusBadge.amount}
                     </div>
                   )}
@@ -496,11 +491,11 @@ function StepConfirm({ itemsList, selectedItems, reasons, notes, totalRefund, or
         <div className="mt-3 pt-3 border-t border-[#e6e6ec] flex items-center justify-between gap-3">
           <span className="text-[12px] text-[#666] font-medium">Refund method</span>
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[12px] font-semibold"
-                style={{ background: meta.bg, color: meta.color }}>
+            style={{ background: meta.bg, color: meta.color }}>
             <Icon name={meta.icon} size={12} />
             {refundType === 'ORIGINAL_PAYMENT' && 'Refund to original payment (5–10 days)'}
-            {refundType === 'STORE_CREDIT'     && `Store credit · $${(showBonus ? creditTotal : totalRefund).toFixed(2)}`}
-            {refundType === 'EXCHANGE'         && 'Exchange · item selection after submission'}
+            {refundType === 'STORE_CREDIT' && `Store credit · $${(showBonus ? creditTotal : totalRefund).toFixed(2)}`}
+            {refundType === 'EXCHANGE' && 'Exchange · item selection after submission'}
           </span>
         </div>
       </div>
@@ -512,8 +507,8 @@ function StepConfirm({ itemsList, selectedItems, reasons, notes, totalRefund, or
         <div>
           <div className="text-[13px] font-semibold text-[#0f1117]">Ship to</div>
           <div className="text-[12.5px] text-[#666] mt-0.5 leading-relaxed">
-            Acme Store — Returns<br/>
-            1450 Mission St, Suite 200<br/>
+            Acme Store — Returns<br />
+            1450 Mission St, Suite 200<br />
             San Francisco, CA 94103
           </div>
           <div className="text-[11.5px] text-[#6C63FF] mt-1.5">A prepaid label will be emailed to {email || 'you'}.</div>

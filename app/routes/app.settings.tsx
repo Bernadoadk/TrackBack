@@ -67,7 +67,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
     const reasonsStr = formData.get("reasons") as string;
     const reasons = JSON.parse(reasonsStr);
-    
+
     await prisma.$transaction([
       prisma.returnReason.deleteMany({ where: { shop } }),
       prisma.returnReason.createMany({
@@ -90,8 +90,8 @@ export default function SettingsPage() {
   const tabs = [
     { key: 'General', icon: 'Settings2' },
     { key: 'Reasons', icon: 'Tag' },
-    { key: 'Policy',  icon: 'FileText' },
-    { key: 'Portal',  icon: 'Globe' },
+    { key: 'Policy', icon: 'FileText' },
+    { key: 'Portal', icon: 'Globe' },
   ];
 
   // Support deep-link via ?tab=Portal (or any other tab key)
@@ -127,8 +127,8 @@ export default function SettingsPage() {
 
       {tab === 'General' && <GeneralTab settings={settings} />}
       {tab === 'Reasons' && <ReasonsTab settings={settings} plan={plan} />}
-      {tab === 'Policy'  && <PolicyTab settings={settings} />}
-      {tab === 'Portal'  && <PortalAccessTab shop={shop} appUrl={appUrl} />}
+      {tab === 'Policy' && <PolicyTab settings={settings} />}
+      {tab === 'Portal' && <PortalAccessTab shop={shop} appUrl={appUrl} />}
     </div>
   );
 }
@@ -196,7 +196,7 @@ function GeneralTab({ settings }: any) {
     formData.append("allowExchanges", allowExchanges.toString());
     formData.append("storeCreditBonusPercent", storeCreditBonusPercent.toString());
     formData.append("incentivizeStoreCredit", incentivizeStoreCredit.toString());
-    
+
     submit(formData, { method: "POST" });
   };
 
@@ -216,8 +216,8 @@ function GeneralTab({ settings }: any) {
 
       <SettingRow label="Auto-approve returns" hint="Skip manual review for returns under your return window.">
         <Toggle checked={autoApprove} onChange={setAutoApprove}
-                label={autoApprove ? 'Returns are auto-approved' : 'Manual review required'}
-                description="Recommended off until your reason policy is tuned." />
+          label={autoApprove ? 'Returns are auto-approved' : 'Manual review required'}
+          description="Recommended off until your reason policy is tuned." />
       </SettingRow>
 
       <SettingRow label="Auto-expire approved returns" hint="Automatically expire approved returns if the customer hasn't shipped after this many days.">
@@ -240,8 +240,8 @@ function GeneralTab({ settings }: any) {
 
       <SettingRow label="Notify merchant" hint="Get an email each time a customer files a new return.">
         <Toggle checked={notify} onChange={setNotify}
-                label="Email me when a new request comes in"
-                description={fromEmail} />
+          label="Email me when a new request comes in"
+          description={fromEmail} />
       </SettingRow>
 
       <SettingRow label="From email" hint="The reply-to address on automated emails to customers.">
@@ -266,29 +266,29 @@ function GeneralTab({ settings }: any) {
           {/* Store credit */}
           <div className="p-4 rounded-md bg-bg/40 border border-divider">
             <Toggle checked={allowStoreCredit} onChange={setAllowStoreCredit}
-                    label="Allow Store Credit refunds"
-                    description="Let customers choose store credit — issued instantly, retains revenue." />
+              label="Allow Store Credit refunds"
+              description="Let customers choose store credit — issued instantly, retains revenue." />
             {allowStoreCredit && (
               <div className="mt-3 pl-12 space-y-3 animate-fadeIn">
                 <div className="flex items-center gap-3 flex-wrap">
                   <label className="text-[12.5px] text-muted shrink-0">Store credit bonus</label>
                   <div className="flex items-center gap-1.5">
                     <input type="number" min={0} max={50}
-                           value={storeCreditBonusPercent}
-                           onChange={e => setStoreCreditBonusPercent(Math.max(0, Math.min(50, +e.target.value || 0)))}
-                           placeholder="10"
-                           className="w-20 h-8 px-3 text-[13px] rounded-md bg-bg border border-border text-ink focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 text-center tabular-nums" />
+                      value={storeCreditBonusPercent}
+                      onChange={e => setStoreCreditBonusPercent(Math.max(0, Math.min(50, +e.target.value || 0)))}
+                      placeholder="10"
+                      className="w-20 h-8 px-3 text-[13px] rounded-md bg-bg border border-border text-ink focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 text-center tabular-nums" />
                     <span className="text-[12.5px] text-muted">% bonus</span>
                   </div>
                   <span className="text-[11.5px] text-faint">0 = no bonus</span>
                 </div>
                 <Toggle checked={incentivizeStoreCredit}
-                        onChange={setIncentivizeStoreCredit}
-                        label="Incentivize store credit in the portal"
-                        description="Show a badge and the bonus percentage on the store-credit option." />
+                  onChange={setIncentivizeStoreCredit}
+                  label="Incentivize store credit in the portal"
+                  description="Show a badge and the bonus percentage on the store-credit option." />
                 {incentivizeStoreCredit && storeCreditBonusPercent > 0 && (
                   <div className="px-3 py-2 rounded-md text-[12px] flex items-center gap-2 animate-fadeIn"
-                       style={{ background: 'rgba(108,99,255,0.10)', color: '#8B85FF' }}>
+                    style={{ background: 'rgba(108,99,255,0.10)', color: '#8B85FF' }}>
                     <Icon name="Sparkles" size={12} />
                     Customers will see <strong className="text-ink">+{storeCreditBonusPercent}% bonus credit</strong> on the store-credit option.
                   </div>
@@ -300,8 +300,8 @@ function GeneralTab({ settings }: any) {
           {/* Exchanges */}
           <div className="p-4 rounded-md bg-bg/40 border border-divider">
             <Toggle checked={allowExchanges} onChange={setAllowExchanges}
-                    label="Allow Exchanges"
-                    description="Let customers swap an item for another size, color, or product." />
+              label="Allow Exchanges"
+              description="Let customers swap an item for another size, color, or product." />
             {allowExchanges && (
               <div className="mt-3 pl-12 space-y-2 animate-fadeIn">
                 <div className="flex items-center gap-3 flex-wrap">
@@ -409,9 +409,9 @@ function ReasonsTab({ settings, plan }: any) {
 
       <div className="mt-5 pt-5 border-t border-divider flex items-center gap-2">
         <Input value={newLabel} onChange={(e: any) => isPro && setNewLabel(e.target.value)}
-               onKeyDown={(e: any) => e.key === 'Enter' && isPro && addReason()}
-               placeholder={isPro ? "e.g. Item not as pictured" : "Pro plan required"} className="flex-1"
-               disabled={!isPro} />
+          onKeyDown={(e: any) => e.key === 'Enter' && isPro && addReason()}
+          placeholder={isPro ? "e.g. Item not as pictured" : "Pro plan required"} className="flex-1"
+          disabled={!isPro} />
         <Btn variant="secondary" icon="Plus" onClick={addReason} disabled={!newLabel.trim() || !isPro}>Add Custom Reason</Btn>
       </div>
 
@@ -424,13 +424,13 @@ function ReasonsTab({ settings, plan }: any) {
 function PortalAccessTab({ shop, appUrl }: { shop: string; appUrl: string }) {
   const [copied, setCopied] = useState<string | null>(null);
 
-  const proxyUrl   = `https://${shop}/apps/returns`;
-  const directUrl  = `${appUrl}/portal?shop=${shop}`;
+  const proxyUrl = `https://${shop}/apps/returns`;
+  const directUrl = `${appUrl}/portal?shop=${shop}`;
   const iframeCode = `<iframe\n  src="${directUrl}"\n  width="100%"\n  height="700"\n  frameborder="0"\n  style="border:none;border-radius:12px;"\n></iframe>`;
 
-  const EXTENSION_UID    = "e8b27fcc-79e9-97be-bb6e-f4b9ff6f32de1c30314c";
-  const EXTENSION_HANDLE = "returnflow-return-button";
-  const themeEditorUrl   = `https://${shop}/admin/themes/current/editor?addAppBlockId=${EXTENSION_UID}/${EXTENSION_HANDLE}&target=newAppsSection`;
+  const EXTENSION_UID = "e8b27fcc-79e9-97be-bb6e-f4b9ff6f32de1c30314c";
+  const EXTENSION_HANDLE = "TrackBack-return-button";
+  const themeEditorUrl = `https://${shop}/admin/themes/current/editor?addAppBlockId=${EXTENSION_UID}/${EXTENSION_HANDLE}&target=newAppsSection`;
 
   const copy = (key: string, text: string) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -465,20 +465,20 @@ function PortalAccessTab({ shop, appUrl }: { shop: string; appUrl: string }) {
 
       {/* ── 1. Theme block ──────────────────────────────────────────────── */}
       <SectionShell number={1} colorRgb="34,197,94" iconName="Blocks" title="Add a Return button to your theme"
-        subtitle="Drop the ReturnFlow theme block on any page — footer, FAQ, order status, anywhere — without touching code.">
+        subtitle="Drop the TrackBack theme block on any page — footer, FAQ, order status, anywhere — without touching code.">
         <Stepper
           color="#22C55E"
           steps={[
-            { title: 'Click "Open Theme Editor"',       body: 'The Return Button block is pre-selected for you.' },
-            { title: 'Pick a section',                  body: 'Add it to your Footer group, or any section where it makes sense.' },
-            { title: 'Hit Save',                        body: 'Top-right corner of the theme editor. Live instantly.' },
+            { title: 'Click "Open Theme Editor"', body: 'The Return Button block is pre-selected for you.' },
+            { title: 'Pick a section', body: 'Add it to your Footer group, or any section where it makes sense.' },
+            { title: 'Hit Save', body: 'Top-right corner of the theme editor. Live instantly.' },
           ]}
         />
 
         <div className="mt-5 flex flex-wrap items-center gap-3">
           <a href={themeEditorUrl} target="_blank" rel="noreferrer"
-             className="group inline-flex items-center gap-2 h-10 px-5 rounded-md text-[13px] font-semibold text-white transition shadow-[0_1px_0_rgba(255,255,255,0.18)_inset,0_8px_22px_-6px_rgba(34,197,94,0.45)] hover:shadow-[0_1px_0_rgba(255,255,255,0.22)_inset,0_12px_30px_-8px_rgba(34,197,94,0.6)] hover:-translate-y-px"
-             style={{ background: 'linear-gradient(180deg, #2BCD66 0%, #22C55E 100%)' }}>
+            className="group inline-flex items-center gap-2 h-10 px-5 rounded-md text-[13px] font-semibold text-white transition shadow-[0_1px_0_rgba(255,255,255,0.18)_inset,0_8px_22px_-6px_rgba(34,197,94,0.45)] hover:shadow-[0_1px_0_rgba(255,255,255,0.22)_inset,0_12px_30px_-8px_rgba(34,197,94,0.6)] hover:-translate-y-px"
+            style={{ background: 'linear-gradient(180deg, #2BCD66 0%, #22C55E 100%)' }}>
             <Icon name="ExternalLink" size={14} className="transition-transform group-hover:translate-x-[1px]" />
             Open Theme Editor
           </a>
@@ -570,7 +570,7 @@ function PortalAccessTab({ shop, appUrl }: { shop: string; appUrl: string }) {
 function QuickJump({ label, color }: { label: string; color: string }) {
   return (
     <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium"
-          style={{ background: `${color}1f`, color }}>
+      style={{ background: `${color}1f`, color }}>
       <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
       {label}
     </span>
@@ -588,11 +588,11 @@ function SectionShell({ number, colorRgb, iconName, title, subtitle, children }:
         <div className="flex items-start gap-4 mb-5">
           <div className="relative shrink-0">
             <div className="w-11 h-11 rounded-lg grid place-content-center"
-                 style={{ background: `rgba(${colorRgb},0.12)`, color: `rgb(${colorRgb})` }}>
+              style={{ background: `rgba(${colorRgb},0.12)`, color: `rgb(${colorRgb})` }}>
               <Icon name={iconName} size={18} />
             </div>
             <div className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full grid place-content-center text-[10.5px] font-bold text-white shadow-md"
-                 style={{ background: `rgb(${colorRgb})` }}>
+              style={{ background: `rgb(${colorRgb})` }}>
               {number}
             </div>
           </div>
@@ -614,7 +614,7 @@ function Stepper({ steps, color }: { color: string; steps: { title: string; body
         <li key={i} className="flex gap-3">
           <div className="relative flex flex-col items-center">
             <span className="w-6 h-6 rounded-full grid place-content-center text-[11px] font-bold shrink-0"
-                  style={{ background: `${color}26`, color }}>
+              style={{ background: `${color}26`, color }}>
               {i + 1}
             </span>
             {i < steps.length - 1 && (
@@ -632,9 +632,9 @@ function Stepper({ steps, color }: { color: string; steps: { title: string; body
 }
 
 const BADGE_TONES: Record<string, { bg: string; fg: string }> = {
-  green:  { bg: 'rgba(34,197,94,0.15)',  fg: '#16A34A' },
+  green: { bg: 'rgba(34,197,94,0.15)', fg: '#16A34A' },
   purple: { bg: 'rgba(108,99,255,0.15)', fg: '#7c70ff' },
-  blue:   { bg: 'rgba(59,130,246,0.15)', fg: '#3B82F6' },
+  blue: { bg: 'rgba(59,130,246,0.15)', fg: '#3B82F6' },
 };
 
 function UrlCard({ label, badge, badgeTone, tagline, url, urlScheme, copyKey, copied, onCopy }: {
@@ -650,7 +650,7 @@ function UrlCard({ label, badge, badgeTone, tagline, url, urlScheme, copyKey, co
       <div className="flex items-center gap-2 mb-1.5">
         <span className="text-[12.5px] font-semibold text-ink">{label}</span>
         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide rounded"
-              style={{ background: tone.bg, color: tone.fg }}>
+          style={{ background: tone.bg, color: tone.fg }}>
           {badgeTone === 'green' && <Icon name="Check" size={9} strokeWidth={3} />}
           {badge}
         </span>
@@ -664,17 +664,16 @@ function UrlCard({ label, badge, badgeTone, tagline, url, urlScheme, copyKey, co
         </div>
         <button
           onClick={() => onCopy(copyKey, url)}
-          className={`h-9 px-3 rounded-md text-[12px] font-medium border transition flex items-center gap-1.5 shrink-0 ${
-            isCopied
+          className={`h-9 px-3 rounded-md text-[12px] font-medium border transition flex items-center gap-1.5 shrink-0 ${isCopied
               ? 'border-[#22C55E]/30 bg-[#22C55E]/10 text-[#22C55E]'
               : 'border-border bg-surface hover:bg-bg hover:border-[#3a3e58] text-ink'
-          }`}>
+            }`}>
           {isCopied
             ? <><Icon name="Check" size={13} strokeWidth={2.5} /> Copied</>
             : <><Icon name="Copy" size={13} /> Copy URL</>}
         </button>
         <a href={url} target="_blank" rel="noreferrer"
-           className="h-9 px-3 rounded-md text-[12px] font-medium border border-border bg-surface hover:bg-bg hover:border-[#3a3e58] text-ink transition flex items-center gap-1.5 shrink-0">
+          className="h-9 px-3 rounded-md text-[12px] font-medium border border-border bg-surface hover:bg-bg hover:border-[#3a3e58] text-ink transition flex items-center gap-1.5 shrink-0">
           <Icon name="ExternalLink" size={13} /> Open
         </a>
       </div>
@@ -703,7 +702,7 @@ function CodeCard({ tabLabel, tabColor, badge, badgeTone, description, code, lan
           <span className="w-1.5 h-1.5 rounded-full" style={{ background: tabColor }} />
           <span className="text-[12px] font-semibold text-ink">{tabLabel}</span>
           <span className="px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide rounded"
-                style={{ background: tone.bg, color: tone.fg }}>
+            style={{ background: tone.bg, color: tone.fg }}>
             {badge}
           </span>
         </div>
@@ -716,22 +715,20 @@ function CodeCard({ tabLabel, tabColor, badge, badgeTone, description, code, lan
       {/* Code + copy */}
       <div className="px-4 pb-4">
         <div className="relative">
-          <pre className={`w-full p-3 pr-16 rounded-md font-mono text-[11.5px] leading-relaxed overflow-x-auto ${
-            isDark ? 'bg-[#0f1117] text-[#e2e8f0]' : 'bg-bg border border-border text-ink'
-          }`}>
+          <pre className={`w-full p-3 pr-16 rounded-md font-mono text-[11.5px] leading-relaxed overflow-x-auto ${isDark ? 'bg-[#0f1117] text-[#e2e8f0]' : 'bg-bg border border-border text-ink'
+            }`}>
             {code}
           </pre>
           <button
             onClick={() => onCopy(copyKey, code)}
-            className={`absolute top-2 right-2 h-7 px-2.5 rounded text-[11px] font-medium transition flex items-center gap-1.5 ${
-              isDark
+            className={`absolute top-2 right-2 h-7 px-2.5 rounded text-[11px] font-medium transition flex items-center gap-1.5 ${isDark
                 ? (isCopied
-                    ? 'bg-[#22C55E]/20 text-[#22C55E]'
-                    : 'bg-white/10 hover:bg-white/20 text-white')
+                  ? 'bg-[#22C55E]/20 text-[#22C55E]'
+                  : 'bg-white/10 hover:bg-white/20 text-white')
                 : (isCopied
-                    ? 'bg-[#22C55E]/15 text-[#22C55E]'
-                    : 'border border-border bg-surface hover:bg-bg text-ink')
-            }`}>
+                  ? 'bg-[#22C55E]/15 text-[#22C55E]'
+                  : 'border border-border bg-surface hover:bg-bg text-ink')
+              }`}>
             {isCopied
               ? <><Icon name="Check" size={12} strokeWidth={2.5} /> Copied</>
               : <><Icon name="Copy" size={12} /> Copy</>}

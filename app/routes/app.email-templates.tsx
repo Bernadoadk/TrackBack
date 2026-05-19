@@ -21,39 +21,39 @@ const TEMPLATE_TYPES = ["Request Received", "Approved", "Rejected", "Refunded"] 
 const TEMPLATE_VARS: Record<string, { key: string; label: string }[]> = {
   "Request Received": [
     { key: "customer_name", label: "Customer name" },
-    { key: "rma_number",    label: "RMA number"    },
-    { key: "order_number",  label: "Order #"        },
-    { key: "item_count",    label: "Item count"     },
+    { key: "rma_number", label: "RMA number" },
+    { key: "order_number", label: "Order #" },
+    { key: "item_count", label: "Item count" },
   ],
   Approved: [
     { key: "customer_name", label: "Customer name" },
-    { key: "rma_number",    label: "RMA number"    },
-    { key: "order_number",  label: "Order #"        },
+    { key: "rma_number", label: "RMA number" },
+    { key: "order_number", label: "Order #" },
     { key: "refund_amount", label: "Refund amount" },
   ],
   Rejected: [
-    { key: "customer_name",   label: "Customer name"    },
-    { key: "rma_number",      label: "RMA number"       },
-    { key: "order_number",    label: "Order #"           },
-    { key: "rejection_reason",label: "Rejection reason" },
+    { key: "customer_name", label: "Customer name" },
+    { key: "rma_number", label: "RMA number" },
+    { key: "order_number", label: "Order #" },
+    { key: "rejection_reason", label: "Rejection reason" },
   ],
   Refunded: [
     { key: "customer_name", label: "Customer name" },
-    { key: "rma_number",    label: "RMA number"    },
-    { key: "order_number",  label: "Order #"        },
+    { key: "rma_number", label: "RMA number" },
+    { key: "order_number", label: "Order #" },
     { key: "refund_amount", label: "Refund amount" },
   ],
 };
 
 const SAMPLE: Record<string, string> = {
-  customer_name:    "Jane Smith",
-  rma_number:       "RMA-2026-000042",
-  order_number:     "#1089",
-  item_count:       "2",
-  refund_amount:    "$42.00",
+  customer_name: "Jane Smith",
+  rma_number: "RMA-2026-000042",
+  order_number: "#1089",
+  item_count: "2",
+  refund_amount: "$42.00",
   rejection_reason: "Item is not eligible for return.",
-  carrier:          "UPS",
-  tracking_number:  "1Z999AA10123456784",
+  carrier: "UPS",
+  tracking_number: "1Z999AA10123456784",
 };
 
 // ─── Loader ──────────────────────────────────────────────────────────────────
@@ -84,9 +84,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return {
     shop,
     plan,
-    logoUrl:    settings.logoUrl ?? "",
+    logoUrl: settings.logoUrl ?? "",
     brandColor: settings.emailBrandColor,
-    fromEmail:  settings.fromEmail,
+    fromEmail: settings.fromEmail,
     templates,
   };
 };
@@ -104,10 +104,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const intent = fd.get("intent") as string;
 
   if (intent === "upload_logo") {
-    const base64      = fd.get("base64")      as string;
+    const base64 = fd.get("base64") as string;
     const previousUrl = fd.get("previousUrl") as string;
     if (previousUrl && isCloudinaryUrl(previousUrl)) {
-      await deleteFromCloudinary(previousUrl).catch(() => {});
+      await deleteFromCloudinary(previousUrl).catch(() => { });
     }
     const { url } = await uploadToCloudinary(base64);
     await prisma.shopSettings.update({ where: { shop }, data: { logoUrl: url } });
@@ -117,7 +117,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (intent === "remove_logo") {
     const logoUrl = fd.get("logoUrl") as string;
     if (isCloudinaryUrl(logoUrl)) {
-      await deleteFromCloudinary(logoUrl).catch(() => {});
+      await deleteFromCloudinary(logoUrl).catch(() => { });
     }
     await prisma.shopSettings.update({ where: { shop }, data: { logoUrl: null } });
     return { removed: true };
@@ -132,11 +132,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   if (intent === "save_template") {
-    const type    = fd.get("type")    as string;
+    const type = fd.get("type") as string;
     const subject = fd.get("subject") as string;
-    const body    = fd.get("body")    as string;
+    const body = fd.get("body") as string;
     await prisma.emailTemplate.upsert({
-      where:  { shop_type: { shop, type } },
+      where: { shop_type: { shop, type } },
       create: { shop, type, subject, body },
       update: { subject, body },
     });
@@ -153,20 +153,20 @@ export default function EmailTemplatesPage() {
     useLoaderData<typeof loader>();
   const isStarter = plan === 'starter' || plan === 'pro';
 
-  const submit     = useSubmit();
+  const submit = useSubmit();
   const navigation = useNavigation();
   const actionData = useActionData<typeof action>();
-  const toast      = useToast();
-  const location   = useLocation();
+  const toast = useToast();
+  const location = useLocation();
   const billingHref = `/app/billing${location.search}`;
 
-  const [logoUrl,    setLogoUrl]    = useState(initLogo);
+  const [logoUrl, setLogoUrl] = useState(initLogo);
   const [brandColor, setBrandColor] = useState(initColor);
   const [activeType, setActiveType] = useState<string>(TEMPLATE_TYPES[0]);
 
   const byType = (t: string): Template => {
     const found = templates.find((x: any) => x.type === t);
-    const def   = EMAIL_TEMPLATES[t as keyof typeof EMAIL_TEMPLATES];
+    const def = EMAIL_TEMPLATES[t as keyof typeof EMAIL_TEMPLATES];
     return found ?? { type: t, subject: def?.subject ?? "", body: def?.body ?? "" };
   };
 
@@ -197,17 +197,17 @@ export default function EmailTemplatesPage() {
   const saveTemplate = () => {
     const fd = new FormData();
     fd.append("intent", "save_template");
-    fd.append("type",    cur.type);
+    fd.append("type", cur.type);
     fd.append("subject", cur.subject);
-    fd.append("body",    cur.body);
+    fd.append("body", cur.body);
     submit(fd, { method: "POST" });
   };
 
   const TYPE_META: Record<string, { icon: string; color: string; bg: string; desc: string }> = {
-    "Request Received": { icon: "Inbox",    color: "#3B82F6", bg: "rgba(59,130,246,0.1)",  desc: "Sent when a customer submits a return" },
-    "Approved":         { icon: "Check",    color: "#10B981", bg: "rgba(16,185,129,0.1)",  desc: "Sent when you approve a return request" },
-    "Rejected":         { icon: "X",        color: "#EF4444", bg: "rgba(239,68,68,0.1)",   desc: "Sent when you reject a return request" },
-    "Refunded":         { icon: "Banknote", color: "#8B5CF6", bg: "rgba(139,92,246,0.1)",  desc: "Sent when the refund is issued" },
+    "Request Received": { icon: "Inbox", color: "#3B82F6", bg: "rgba(59,130,246,0.1)", desc: "Sent when a customer submits a return" },
+    "Approved": { icon: "Check", color: "#10B981", bg: "rgba(16,185,129,0.1)", desc: "Sent when you approve a return request" },
+    "Rejected": { icon: "X", color: "#EF4444", bg: "rgba(239,68,68,0.1)", desc: "Sent when you reject a return request" },
+    "Refunded": { icon: "Banknote", color: "#8B5CF6", bg: "rgba(139,92,246,0.1)", desc: "Sent when the refund is issued" },
   };
 
   return (
@@ -283,9 +283,8 @@ export default function EmailTemplatesPage() {
             <button
               key={t}
               onClick={() => setActiveType(t)}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg border text-[13px] font-medium transition ${
-                active ? "border-accent bg-accent/5 text-ink" : "border-border bg-surface text-muted hover:text-ink hover:border-border/80"
-              }`}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg border text-[13px] font-medium transition ${active ? "border-accent bg-accent/5 text-ink" : "border-border bg-surface text-muted hover:text-ink hover:border-border/80"
+                }`}
             >
               <div
                 className="w-5 h-5 rounded grid place-content-center"
@@ -383,12 +382,12 @@ function BodyEditor({ value, onChange, vars }: {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const insertVar = (key: string) => {
-    const ta  = textareaRef.current;
+    const ta = textareaRef.current;
     if (!ta) return;
     const start = ta.selectionStart ?? value.length;
-    const end   = ta.selectionEnd   ?? value.length;
+    const end = ta.selectionEnd ?? value.length;
     const token = `{{${key}}}`;
-    const next  = value.slice(0, start) + token + value.slice(end);
+    const next = value.slice(0, start) + token + value.slice(end);
     onChange(next);
     // Restore cursor after the inserted token
     requestAnimationFrame(() => {
@@ -451,7 +450,7 @@ function EmailPreview({ logoUrl, brandColor, storeName, subject, body }: {
     <div style={{ fontFamily: "sans-serif" }}>
       {/* Email meta bar */}
       <div style={{ marginBottom: 12, fontSize: 11.5, color: "#888", background: "#fff", borderRadius: 8, padding: "10px 14px", border: "1px solid #e6e6ec" }}>
-        <div style={{ marginBottom: 3 }}><strong style={{ color: "#444" }}>From:</strong> ReturnFlow &lt;returns@{storeName}&gt;</div>
+        <div style={{ marginBottom: 3 }}><strong style={{ color: "#444" }}>From:</strong> TrackBack &lt;returns@{storeName}&gt;</div>
         <div><strong style={{ color: "#444" }}>Subject:</strong> {fill(subject) || <span style={{ color: "#aaa" }}>—</span>}</div>
       </div>
 
@@ -461,8 +460,8 @@ function EmailPreview({ logoUrl, brandColor, storeName, subject, body }: {
         <div style={{ background: brandColor, padding: "22px 28px 20px" }}>
           {logoUrl ? (
             <img src={logoUrl} alt="Logo"
-                 style={{ height: 38, width: "auto", objectFit: "contain", marginBottom: 8, display: "block", maxWidth: 180 }}
-                 onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+              style={{ height: 38, width: "auto", objectFit: "contain", marginBottom: 8, display: "block", maxWidth: 180 }}
+              onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
           ) : (
             <div style={{ fontSize: 20, fontWeight: 700, color: "#fff", marginBottom: 4 }}>
               {storeName}
@@ -479,15 +478,15 @@ function EmailPreview({ logoUrl, brandColor, storeName, subject, body }: {
         {/* CTA */}
         <div style={{ padding: "0 32px 24px" }}>
           <a href="#"
-             style={{ display: "inline-block", padding: "10px 22px", borderRadius: 8, background: brandColor, color: "#fff", fontWeight: 600, fontSize: 13, textDecoration: "none", cursor: "default" }}
-             onClick={e => e.preventDefault()}>
+            style={{ display: "inline-block", padding: "10px 22px", borderRadius: 8, background: brandColor, color: "#fff", fontWeight: 600, fontSize: 13, textDecoration: "none", cursor: "default" }}
+            onClick={e => e.preventDefault()}>
             View Return Status
           </a>
         </div>
 
         {/* Footer */}
         <div style={{ padding: "16px 32px", borderTop: "1px solid #f0f0f0", textAlign: "center", color: "#9ca3af", fontSize: 12 }}>
-          🔒 Secured by ReturnFlow
+          🔒 Secured by TrackBack
         </div>
       </div>
     </div>

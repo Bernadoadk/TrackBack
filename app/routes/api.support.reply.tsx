@@ -1,4 +1,4 @@
-// Inbound bridge: ReturnFlow support team (you) replies to a merchant.
+// Inbound bridge: TrackBack support team (you) replies to a merchant.
 // Protected by a shared secret SUPPORT_REPLY_TOKEN (env var).
 //
 // Example call from Discord bot or curl:
@@ -47,7 +47,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return Response.json({ error: "Conversation not found" }, { status: 404 });
   }
 
-  const senderName = body.senderName ? String(body.senderName) : "ReturnFlow Support";
+  const senderName = body.senderName ? String(body.senderName) : "TrackBack Support";
 
   const message = await prisma.chatMessage.create({
     data: {

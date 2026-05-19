@@ -105,7 +105,7 @@ export async function sendDiscordSupportMessage(params: {
     };
 
     const body: any = {
-      username: "ReturnFlow Support",
+      username: "TrackBack Support",
       allowed_mentions: { parse: [] },
       embeds: [embed],
     };

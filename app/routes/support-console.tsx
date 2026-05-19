@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-// ReturnFlow internal support console
+// TrackBack internal support console
 // Public route — protected only by the SUPPORT_REPLY_TOKEN you store in localStorage.
 // Designed to be opened from Discord notification links: /support-console?conv=xxx
 
@@ -65,7 +65,7 @@ export default function SupportConsole() {
         if (r.status === 401) {
           setError("Invalid token. Re-enter it.");
           setToken("");
-          try { localStorage.removeItem(STORAGE_KEY); } catch {}
+          try { localStorage.removeItem(STORAGE_KEY); } catch { }
           return;
         }
         if (!r.ok) {
@@ -93,7 +93,7 @@ export default function SupportConsole() {
     const t = tokenInput.trim();
     if (!t) return;
     setToken(t);
-    try { localStorage.setItem(STORAGE_KEY, t); } catch {}
+    try { localStorage.setItem(STORAGE_KEY, t); } catch { }
     setTokenInput("");
   };
 
@@ -143,7 +143,7 @@ export default function SupportConsole() {
     return (
       <div style={pageStyle}>
         <div style={cardStyle}>
-          <h1 style={titleStyle}>ReturnFlow · Support Console</h1>
+          <h1 style={titleStyle}>TrackBack · Support Console</h1>
           <p style={subStyle}>
             Enter your <code>SUPPORT_REPLY_TOKEN</code> to access. It's stored
             in this browser only.
@@ -173,7 +173,7 @@ export default function SupportConsole() {
           <button
             onClick={() => {
               setToken("");
-              try { localStorage.removeItem(STORAGE_KEY); } catch {}
+              try { localStorage.removeItem(STORAGE_KEY); } catch { }
             }}
             style={linkBtn}
           >

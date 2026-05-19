@@ -21,34 +21,34 @@ const GROUPS: GroupDef[] = [
     label: "Get started",
     icon: "Sparkles",
     sections: [
-      { id: "getting-started", title: "Getting started",  icon: "Sparkles" },
-      { id: "portal",          title: "Customer portal",  icon: "Globe" },
+      { id: "getting-started", title: "Getting started", icon: "Sparkles" },
+      { id: "portal", title: "Customer portal", icon: "Globe" },
     ],
   },
   {
     label: "Daily operations",
     icon: "Zap",
     sections: [
-      { id: "returns",         title: "Managing returns", icon: "Package" },
-      { id: "live-chat",       title: "Live chat",        icon: "MessageCircle" },
+      { id: "returns", title: "Managing returns", icon: "Package" },
+      { id: "live-chat", title: "Live chat", icon: "MessageCircle" },
     ],
   },
   {
     label: "Customize",
     icon: "Paintbrush",
     sections: [
-      { id: "portal-editor",   title: "Portal editor",    icon: "Paintbrush" },
-      { id: "email-templates", title: "Email templates",  icon: "Mail" },
-      { id: "settings",        title: "Settings",         icon: "Settings" },
+      { id: "portal-editor", title: "Portal editor", icon: "Paintbrush" },
+      { id: "email-templates", title: "Email templates", icon: "Mail" },
+      { id: "settings", title: "Settings", icon: "Settings" },
     ],
   },
   {
     label: "Reference",
     icon: "BookOpen",
     sections: [
-      { id: "billing",         title: "Billing & plans",  icon: "CreditCard" },
-      { id: "compliance",      title: "GDPR & privacy",   icon: "ShieldCheck" },
-      { id: "faq",             title: "FAQ",              icon: "MessageCircleQuestion" },
+      { id: "billing", title: "Billing & plans", icon: "CreditCard" },
+      { id: "compliance", title: "GDPR & privacy", icon: "ShieldCheck" },
+      { id: "faq", title: "FAQ", icon: "MessageCircleQuestion" },
     ],
   },
 ];
@@ -121,7 +121,7 @@ export default function DocsPage() {
 
       <PageHeader
         title="Documentation"
-        subtitle="Everything you need to set up, run and grow with ReturnFlow."
+        subtitle="Everything you need to set up, run and grow with TrackBack."
         right={
           <a
             href="mailto:bernadoecom@gmail.com"
@@ -144,14 +144,14 @@ export default function DocsPage() {
         <div className="relative p-7 md:p-9 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
           <div className="max-w-xl">
             <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10.5px] font-bold uppercase tracking-wider mb-3"
-                 style={{ background: "rgba(108,99,255,0.15)", color: "#8B85FF" }}>
+              style={{ background: "rgba(108,99,255,0.15)", color: "#8B85FF" }}>
               <Icon name="Sparkles" size={11} /> Welcome
             </div>
             <h2 className="text-[26px] md:text-[30px] font-bold text-ink tracking-tight leading-tight">
               Run returns on autopilot.
             </h2>
             <p className="text-[14px] text-muted mt-2 leading-relaxed">
-              ReturnFlow handles RMA requests, refunds, store credit, exchanges,
+              TrackBack handles RMA requests, refunds, store credit, exchanges,
               live chat and analytics — all from your Shopify admin.
             </p>
             <div className="mt-3 flex items-center gap-3 text-[11.5px] text-faint">
@@ -198,9 +198,8 @@ export default function DocsPage() {
               <button
                 key={g.label}
                 onClick={() => switchTab(g.label)}
-                className={`relative inline-flex items-center gap-2 px-4 py-3 text-[13px] font-medium transition-colors whitespace-nowrap ${
-                  isActive ? "text-ink" : "text-muted hover:text-ink"
-                }`}
+                className={`relative inline-flex items-center gap-2 px-4 py-3 text-[13px] font-medium transition-colors whitespace-nowrap ${isActive ? "text-ink" : "text-muted hover:text-ink"
+                  }`}
               >
                 <Icon name={g.icon} size={14} className={isActive ? "text-accent2" : ""} strokeWidth={isActive ? 2.25 : 2} />
                 <span>{g.label}</span>
@@ -222,7 +221,7 @@ export default function DocsPage() {
           <>
             <Section id="getting-started" icon="Sparkles" title="Getting started" badge="New here?">
               <p>
-                ReturnFlow lives inside your Shopify admin. Once installed, your
+                TrackBack lives inside your Shopify admin. Once installed, your
                 customers can request returns from a branded portal you control,
                 and you process them from this dashboard.
               </p>
@@ -305,7 +304,7 @@ export default function DocsPage() {
                 ].map(([k, d, c]) => (
                   <div key={k} className="flex items-center gap-2.5 p-3 rounded-md bg-bg/40 border border-border">
                     <span className="text-[11px] font-bold px-2 py-0.5 rounded ring-1 ring-inset"
-                          style={{ background: c + "22", color: c, borderColor: c + "44" }}>
+                      style={{ background: c + "22", color: c, borderColor: c + "44" }}>
                       {k}
                     </span>
                     <span className="text-[12.5px] text-muted">{d}</span>
@@ -440,7 +439,7 @@ export default function DocsPage() {
 
             <Section id="compliance" icon="ShieldCheck" title="GDPR & privacy">
               <p>
-                ReturnFlow is built with mandatory Shopify compliance webhooks:
+                TrackBack is built with mandatory Shopify compliance webhooks:
               </p>
               <ul>
                 <li>
@@ -468,7 +467,7 @@ export default function DocsPage() {
                 Not yet. We're working on a CSV import — reach out via the chat
                 button if you need this urgently.
               </Faq>
-              <Faq q="Does ReturnFlow handle international returns?">
+              <Faq q="Does TrackBack handle international returns?">
                 Yes. You can configure your return address in Settings → General.
                 Shipping label generation depends on your carrier integration.
               </Faq>
@@ -531,7 +530,7 @@ export default function DocsPage() {
           />
           <div className="relative flex flex-col md:flex-row items-center md:items-start gap-5 md:gap-8 text-center md:text-left">
             <div className="w-12 h-12 rounded-full grid place-content-center shrink-0"
-                 style={{ background: 'linear-gradient(135deg,#6C63FF,#8B5CF6)', boxShadow: '0 8px 22px -8px rgba(108,99,255,0.6)' }}>
+              style={{ background: 'linear-gradient(135deg,#6C63FF,#8B5CF6)', boxShadow: '0 8px 22px -8px rgba(108,99,255,0.6)' }}>
               <Icon name="Heart" size={20} className="text-white" />
             </div>
             <div className="flex-1 min-w-0">
@@ -542,12 +541,12 @@ export default function DocsPage() {
             </div>
             <div className="flex flex-wrap gap-2 justify-center md:justify-end shrink-0">
               <a href="mailto:bernadoecom@gmail.com"
-                 className="inline-flex items-center gap-1.5 px-3.5 h-9 rounded-md text-[12.5px] font-semibold text-white"
-                 style={{ background: 'linear-gradient(135deg,#6C63FF,#8B5CF6)' }}>
+                className="inline-flex items-center gap-1.5 px-3.5 h-9 rounded-md text-[12.5px] font-semibold text-white"
+                style={{ background: 'linear-gradient(135deg,#6C63FF,#8B5CF6)' }}>
                 <Icon name="Mail" size={13} /> Email support
               </a>
               <a href="https://return-flow-web.vercel.app/changelog.html" target="_blank" rel="noreferrer"
-                 className="inline-flex items-center gap-1.5 px-3.5 h-9 rounded-md text-[12.5px] font-semibold text-ink bg-bg/40 border border-border hover:border-accent2 transition">
+                className="inline-flex items-center gap-1.5 px-3.5 h-9 rounded-md text-[12.5px] font-semibold text-ink bg-bg/40 border border-border hover:border-accent2 transition">
                 <Icon name="Sparkles" size={13} /> Changelog
               </a>
             </div>
@@ -572,7 +571,7 @@ function Section({ id, icon, title, badge, children }: {
     const url = `${window.location.origin}${window.location.pathname}#${id}`;
     navigator.clipboard?.writeText(url).then(
       () => toast?.({ kind: 'success', title: 'Link copied' }),
-      () => {/* ignore */},
+      () => {/* ignore */ },
     );
   };
 
@@ -637,7 +636,7 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
 
 function Callout({ kind, children }: { kind: "tip" | "info" | "warn"; children: ReactNode }) {
   const cfg = {
-    tip:  { color: "#22C55E", bg: "rgba(34,197,94,0.10)", icon: "Lightbulb" },
+    tip: { color: "#22C55E", bg: "rgba(34,197,94,0.10)", icon: "Lightbulb" },
     info: { color: "#3B82F6", bg: "rgba(59,130,246,0.10)", icon: "Info" },
     warn: { color: "#F59E0B", bg: "rgba(245,158,11,0.10)", icon: "TriangleAlert" },
   }[kind];
@@ -667,9 +666,8 @@ function Feature({ icon, title, children }: { icon: string; title: string; child
 function PlanCard({ name, price, features, popular }: { name: string; price: string; features: string[]; popular?: boolean }) {
   return (
     <div
-      className={`p-4 rounded-lg border transition-all duration-200 hover:translate-y-[-2px] ${
-        popular ? "border-accent shadow-[0_0_0_1px_rgba(108,99,255,0.3),0_10px_30px_-10px_rgba(108,99,255,0.3)]" : "border-border bg-bg/40"
-      }`}
+      className={`p-4 rounded-lg border transition-all duration-200 hover:translate-y-[-2px] ${popular ? "border-accent shadow-[0_0_0_1px_rgba(108,99,255,0.3),0_10px_30px_-10px_rgba(108,99,255,0.3)]" : "border-border bg-bg/40"
+        }`}
       style={popular ? { background: "rgba(108,99,255,0.06)" } : undefined}
     >
       {popular && (

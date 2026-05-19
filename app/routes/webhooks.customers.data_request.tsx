@@ -34,22 +34,22 @@ async function handleDataRequest(shop: string, payload: any) {
   // Pull every record we have on this customer for this shop
   const returnRequests = email
     ? await prisma.returnRequest.findMany({
-        where: { shop, customerEmail: { equals: email, mode: "insensitive" } },
-        include: { items: true },
-      })
+      where: { shop, customerEmail: { equals: email, mode: "insensitive" } },
+      include: { items: true },
+    })
     : [];
 
   const conversation = email
     ? await prisma.conversation.findUnique({
-        where: {
-          shop_type_customerEmail: {
-            shop,
-            type: "CLIENT",
-            customerEmail: email.toLowerCase(),
-          },
+      where: {
+        shop_type_customerEmail: {
+          shop,
+          type: "CLIENT",
+          customerEmail: email.toLowerCase(),
         },
-        include: { messages: true },
-      })
+      },
+      include: { messages: true },
+    })
     : null;
 
   const dataExport = {
@@ -77,10 +77,10 @@ async function handleDataRequest(shop: string, payload: any) {
     })),
     chatMessages: conversation
       ? conversation.messages.map((m) => ({
-          senderType: m.senderType,
-          body: m.body,
-          createdAt: m.createdAt,
-        }))
+        senderType: m.senderType,
+        body: m.body,
+        createdAt: m.createdAt,
+      }))
       : [],
   };
 
@@ -109,14 +109,14 @@ async function handleDataRequest(shop: string, payload: any) {
     });
 
     await transporter.sendMail({
-      from: `"ReturnFlow GDPR" <${process.env.SMTP_USER}>`,
+      from: `"TrackBack GDPR" <${process.env.SMTP_USER}>`,
       to: merchantEmail,
       subject: `[GDPR] Customer data request — ${email ?? customerId ?? "unknown"}`,
       text:
         `A customer has requested a copy of their data via Shopify GDPR webhook.\n\n` +
         `Customer: ${email ?? "(no email)"} (id ${customerId ?? "—"})\n` +
         `Shop: ${shop}\n\n` +
-        `Below is the data ReturnFlow holds for this customer. Please forward it to them per your privacy policy.\n\n` +
+        `Below is the data TrackBack holds for this customer. Please forward it to them per your privacy policy.\n\n` +
         `${JSON.stringify(dataExport, null, 2)}\n`,
     });
     console.log(

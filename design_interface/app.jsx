@@ -34,10 +34,10 @@ function App() {
         {/* Top bar (mobile) */}
         <div className="md:hidden flex items-center gap-3 h-14 px-4 border-b border-divider bg-surface">
           <div className="w-7 h-7 rounded-md grid place-content-center text-white"
-               style={{ background: 'linear-gradient(135deg,#6C63FF,#8B5CF6)' }}>
+            style={{ background: 'linear-gradient(135deg,#6C63FF,#8B5CF6)' }}>
             <Icon name="RefreshCcw" size={14} strokeWidth={2.5} />
           </div>
-          <div className="font-semibold text-[15px]">ReturnFlow</div>
+          <div className="font-semibold text-[15px]">TrackBack</div>
           <div className="ml-auto flex items-center gap-2 overflow-x-auto">
             {NAV.map(n => (
               <button key={n.key} onClick={() => navigate(n.key)}
@@ -54,10 +54,10 @@ function App() {
           ) : (
             <>
               {page === 'dashboard' && <DashboardPage onNavigate={navigate} onOpenReturn={onOpenReturn} returns={returns} />}
-              {page === 'returns'   && <ReturnsPage returns={returns} onOpenReturn={onOpenReturn} />}
+              {page === 'returns' && <ReturnsPage returns={returns} onOpenReturn={onOpenReturn} />}
               {page === 'analytics' && <AnalyticsPage />}
-              {page === 'settings'  && <SettingsPage onOpenPortal={() => setPortal(true)} shopSettings={shopSettings} updateShopSettings={updateShopSettings} />}
-              {page === 'billing'   && <BillingPage />}
+              {page === 'settings' && <SettingsPage onOpenPortal={() => setPortal(true)} shopSettings={shopSettings} updateShopSettings={updateShopSettings} />}
+              {page === 'billing' && <BillingPage />}
             </>
           )}
         </div>

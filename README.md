@@ -246,6 +246,6 @@ SMTP_PORT="587"
 SMTP_SECURE="false"
 SMTP_USER="adikpetobernado@gmail.com"
 SMTP_PASS="xzad oqrs saop abqd"   # mot de passe application Google
-SMTP_FROM_NAME="ReturnFlow" 
+SMTP_FROM_NAME="TrackBack" 
 
 ---------------

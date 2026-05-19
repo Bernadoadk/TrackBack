@@ -40,13 +40,13 @@ export async function sendChatEmail(params: {
 
   try {
     const info = await transporter.sendMail({
-      from: `"ReturnFlow Chat" <${process.env.SMTP_USER}>`,
+      from: `"TrackBack Chat" <${process.env.SMTP_USER}>`,
       to: merchantEmail,
       subject: `💬 New message from ${params.customerName}`,
       text:
         `${params.customerName} (${params.customerEmail}) just sent you a message:\n\n` +
         `"${params.bodyPreview}"\n\n` +
-        `Reply in your ReturnFlow inbox: ${adminUrl}\n`,
+        `Reply in your TrackBack inbox: ${adminUrl}\n`,
     });
     console.log("[chat] notify email sent:", info.messageId);
     return true;

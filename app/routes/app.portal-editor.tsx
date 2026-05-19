@@ -23,31 +23,31 @@ const CHAT_ICON_CHOICES = [
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 type EditorSettings = {
-  portalLayout:        string;
-  brandColor:          string;
-  bannerColor:         string;
-  logoUrl:             string;
-  portalStoreName:     string;
-  footerContact:       string;
-  labelFindOrder:      string;
-  labelSelectItems:    string;
-  labelReasons:        string;
-  labelRefundType:     string;
-  labelConfirm:        string;
-  labelCta:            string;
-  labelSubmit:         string;
-  descFindOrder:       string;
-  descSelectItems:     string;
-  descReasons:         string;
-  descRefundType:      string;
-  descConfirm:         string;
-  labelBackToStore:    string;
-  labelCantFind:       string;
-  labelStartAnother:   string;
-  labelPoweredBy:      string;
+  portalLayout: string;
+  brandColor: string;
+  bannerColor: string;
+  logoUrl: string;
+  portalStoreName: string;
+  footerContact: string;
+  labelFindOrder: string;
+  labelSelectItems: string;
+  labelReasons: string;
+  labelRefundType: string;
+  labelConfirm: string;
+  labelCta: string;
+  labelSubmit: string;
+  descFindOrder: string;
+  descSelectItems: string;
+  descReasons: string;
+  descRefundType: string;
+  descConfirm: string;
+  labelBackToStore: string;
+  labelCantFind: string;
+  labelStartAnother: string;
+  labelPoweredBy: string;
   labelTrackingToggle: string;
-  liveChatEnabled:     boolean;
-  liveChatIcon:        string;
+  liveChatEnabled: boolean;
+  liveChatIcon: string;
 };
 
 // ─── Loader ──────────────────────────────────────────────────────────────────
@@ -67,31 +67,31 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     shop,
     plan,
     initial: {
-      portalLayout:        s.portalLayout,
-      brandColor:          s.brandColor,
-      bannerColor:         s.bannerColor,
-      logoUrl:             s.logoUrl ?? "",
-      portalStoreName:     s.portalStoreName,
-      footerContact:       s.footerContact,
-      labelFindOrder:      s.labelFindOrder,
-      labelSelectItems:    s.labelSelectItems,
-      labelReasons:        s.labelReasons,
-      labelRefundType:     s.labelRefundType,
-      labelConfirm:        s.labelConfirm,
-      labelCta:            s.labelCta,
-      labelSubmit:         s.labelSubmit,
-      descFindOrder:       s.descFindOrder,
-      descSelectItems:     s.descSelectItems,
-      descReasons:         s.descReasons,
-      descRefundType:      s.descRefundType,
-      descConfirm:         s.descConfirm,
-      labelBackToStore:    s.labelBackToStore,
-      labelCantFind:       s.labelCantFind,
-      labelStartAnother:   s.labelStartAnother,
-      labelPoweredBy:      s.labelPoweredBy,
+      portalLayout: s.portalLayout,
+      brandColor: s.brandColor,
+      bannerColor: s.bannerColor,
+      logoUrl: s.logoUrl ?? "",
+      portalStoreName: s.portalStoreName,
+      footerContact: s.footerContact,
+      labelFindOrder: s.labelFindOrder,
+      labelSelectItems: s.labelSelectItems,
+      labelReasons: s.labelReasons,
+      labelRefundType: s.labelRefundType,
+      labelConfirm: s.labelConfirm,
+      labelCta: s.labelCta,
+      labelSubmit: s.labelSubmit,
+      descFindOrder: s.descFindOrder,
+      descSelectItems: s.descSelectItems,
+      descReasons: s.descReasons,
+      descRefundType: s.descRefundType,
+      descConfirm: s.descConfirm,
+      labelBackToStore: s.labelBackToStore,
+      labelCantFind: s.labelCantFind,
+      labelStartAnother: s.labelStartAnother,
+      labelPoweredBy: s.labelPoweredBy,
       labelTrackingToggle: s.labelTrackingToggle,
-      liveChatEnabled:     (s as any).liveChatEnabled ?? true,
-      liveChatIcon:        (s as any).liveChatIcon ?? "MessageCircle",
+      liveChatEnabled: (s as any).liveChatEnabled ?? true,
+      liveChatIcon: (s as any).liveChatIcon ?? "MessageCircle",
     } satisfies EditorSettings,
   };
 };
@@ -112,7 +112,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const base64 = fd.get("base64") as string;
     const previousUrl = fd.get("previousUrl") as string;
     if (previousUrl && isCloudinaryUrl(previousUrl)) {
-      await deleteFromCloudinary(previousUrl).catch(() => {});
+      await deleteFromCloudinary(previousUrl).catch(() => { });
     }
     const { url } = await uploadToCloudinary(base64);
     await prisma.shopSettings.update({ where: { shop }, data: { logoUrl: url } });
@@ -122,7 +122,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (intent === "remove_logo") {
     const logoUrl = fd.get("logoUrl") as string;
     if (isCloudinaryUrl(logoUrl)) {
-      await deleteFromCloudinary(logoUrl).catch(() => {});
+      await deleteFromCloudinary(logoUrl).catch(() => { });
     }
     await prisma.shopSettings.update({ where: { shop }, data: { logoUrl: null } });
     return { removed: true };
@@ -131,31 +131,31 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   await prisma.shopSettings.update({
     where: { shop },
     data: {
-      portalLayout:        fd.get("portalLayout")        as string,
-      brandColor:          fd.get("brandColor")          as string,
-      bannerColor:         fd.get("bannerColor")         as string,
-      logoUrl:             (fd.get("logoUrl") as string) || null,
-      portalStoreName:     fd.get("portalStoreName")     as string,
-      footerContact:       fd.get("footerContact")       as string,
-      labelFindOrder:      fd.get("labelFindOrder")      as string,
-      labelSelectItems:    fd.get("labelSelectItems")    as string,
-      labelReasons:        fd.get("labelReasons")        as string,
-      labelRefundType:     fd.get("labelRefundType")     as string,
-      labelConfirm:        fd.get("labelConfirm")        as string,
-      labelCta:            fd.get("labelCta")            as string,
-      labelSubmit:         fd.get("labelSubmit")         as string,
-      descFindOrder:       fd.get("descFindOrder")       as string,
-      descSelectItems:     fd.get("descSelectItems")     as string,
-      descReasons:         fd.get("descReasons")         as string,
-      descRefundType:      fd.get("descRefundType")      as string,
-      descConfirm:         fd.get("descConfirm")         as string,
-      labelBackToStore:    fd.get("labelBackToStore")    as string,
-      labelCantFind:       fd.get("labelCantFind")       as string,
-      labelStartAnother:   fd.get("labelStartAnother")  as string,
-      labelPoweredBy:      fd.get("labelPoweredBy")      as string,
+      portalLayout: fd.get("portalLayout") as string,
+      brandColor: fd.get("brandColor") as string,
+      bannerColor: fd.get("bannerColor") as string,
+      logoUrl: (fd.get("logoUrl") as string) || null,
+      portalStoreName: fd.get("portalStoreName") as string,
+      footerContact: fd.get("footerContact") as string,
+      labelFindOrder: fd.get("labelFindOrder") as string,
+      labelSelectItems: fd.get("labelSelectItems") as string,
+      labelReasons: fd.get("labelReasons") as string,
+      labelRefundType: fd.get("labelRefundType") as string,
+      labelConfirm: fd.get("labelConfirm") as string,
+      labelCta: fd.get("labelCta") as string,
+      labelSubmit: fd.get("labelSubmit") as string,
+      descFindOrder: fd.get("descFindOrder") as string,
+      descSelectItems: fd.get("descSelectItems") as string,
+      descReasons: fd.get("descReasons") as string,
+      descRefundType: fd.get("descRefundType") as string,
+      descConfirm: fd.get("descConfirm") as string,
+      labelBackToStore: fd.get("labelBackToStore") as string,
+      labelCantFind: fd.get("labelCantFind") as string,
+      labelStartAnother: fd.get("labelStartAnother") as string,
+      labelPoweredBy: fd.get("labelPoweredBy") as string,
       labelTrackingToggle: fd.get("labelTrackingToggle") as string,
-      liveChatEnabled:     fd.get("liveChatEnabled") === "true",
-      liveChatIcon:        (fd.get("liveChatIcon") as string) || "MessageCircle",
+      liveChatEnabled: fd.get("liveChatEnabled") === "true",
+      liveChatIcon: (fd.get("liveChatIcon") as string) || "MessageCircle",
     } as any,
   });
 
@@ -168,21 +168,21 @@ export default function PortalEditorPage() {
   const { initial, shop, plan } = useLoaderData<typeof loader>();
   const isStarter = plan === 'starter' || plan === 'pro';
   const isPro = plan === 'pro';
-  const submit        = useSubmit();
-  const navigation    = useNavigation();
-  const actionData    = useActionData<typeof action>();
-  const toast         = useToast();
-  const location      = useLocation();
-  const billingHref   = `/app/billing${location.search}`;
+  const submit = useSubmit();
+  const navigation = useNavigation();
+  const actionData = useActionData<typeof action>();
+  const toast = useToast();
+  const location = useLocation();
+  const billingHref = `/app/billing${location.search}`;
 
-  const [s, setS]             = useState<EditorSettings>(initial);
-  const [device, setDevice]   = useState<"desktop" | "mobile">("desktop");
+  const [s, setS] = useState<EditorSettings>(initial);
+  const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [previewStep, setPreviewStep] = useState(1);
   const [openSection, setOpenSection] = useState("layout");
   const [pendingOpen, setPendingOpen] = useState(false);
 
   const isSaving = navigation.state === "submitting";
-  const isDirty  = JSON.stringify(s) !== JSON.stringify(initial);
+  const isDirty = JSON.stringify(s) !== JSON.stringify(initial);
 
   const wasSaving = useRef(false);
   useEffect(() => {
@@ -231,7 +231,7 @@ export default function PortalEditorPage() {
       <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-surface shrink-0 gap-4">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-md grid place-content-center shrink-0"
-               style={{ background: "rgba(108,99,255,0.15)", color: "#8B85FF" }}>
+            style={{ background: "rgba(108,99,255,0.15)", color: "#8B85FF" }}>
             <Icon name="Paintbrush2" size={15} />
           </div>
           <div>
@@ -378,11 +378,10 @@ export default function PortalEditorPage() {
                         type="button"
                         onClick={() => set("liveChatIcon", name)}
                         title={name}
-                        className={`h-10 grid place-content-center rounded-md border-2 transition ${
-                          selected
+                        className={`h-10 grid place-content-center rounded-md border-2 transition ${selected
                             ? "border-accent bg-accent/10 text-accent2"
                             : "border-transparent bg-bg/40 hover:bg-bg/80 text-ink"
-                        }`}
+                          }`}
                       >
                         <Icon name={name} size={16} strokeWidth={2.25} />
                       </button>
@@ -399,8 +398,8 @@ export default function PortalEditorPage() {
                   Live chat with customers is a Pro feature.
                 </div>
                 <Link to={billingHref}
-                   className="inline-flex items-center gap-1 px-2.5 h-7 rounded-md text-[12px] font-semibold text-white"
-                   style={{ background: 'linear-gradient(90deg,#6C63FF,#8B5CF6)' }}>
+                  className="inline-flex items-center gap-1 px-2.5 h-7 rounded-md text-[12px] font-semibold text-white"
+                  style={{ background: 'linear-gradient(90deg,#6C63FF,#8B5CF6)' }}>
                   Upgrade <Icon name="ArrowRight" size={12} />
                 </Link>
               </div>
@@ -423,9 +422,8 @@ export default function PortalEditorPage() {
                 <button
                   key={d}
                   onClick={() => setDevice(d)}
-                  className={`flex items-center gap-1.5 px-3 h-7 rounded-md text-[12px] font-medium transition ${
-                    device === d ? "bg-surface shadow-sm text-ink" : "text-muted hover:text-ink"
-                  }`}
+                  className={`flex items-center gap-1.5 px-3 h-7 rounded-md text-[12px] font-medium transition ${device === d ? "bg-surface shadow-sm text-ink" : "text-muted hover:text-ink"
+                    }`}
                 >
                   <Icon name={d === "desktop" ? "Monitor" : "Smartphone"} size={12} />
                   {d === "desktop" ? "Desktop" : "Mobile"}
@@ -440,11 +438,10 @@ export default function PortalEditorPage() {
                   key={label}
                   onClick={() => setPreviewStep(i + 1)}
                   title={label}
-                  className={`h-7 px-2.5 rounded-md text-[11.5px] font-semibold transition ${
-                    previewStep === i + 1
+                  className={`h-7 px-2.5 rounded-md text-[11.5px] font-semibold transition ${previewStep === i + 1
                       ? "bg-surface shadow-sm text-ink border border-border"
                       : "text-muted hover:text-ink"
-                  }`}
+                    }`}
                 >
                   {i + 1}
                 </button>
@@ -468,7 +465,7 @@ export default function PortalEditorPage() {
 
           {isDirty && !isSaving && (
             <div className="px-5 py-2 flex items-center gap-2 text-[11.5px] font-medium shrink-0"
-                 style={{ background: "rgba(245,158,11,0.08)", borderBottom: "1px solid rgba(245,158,11,0.2)", color: "#92400e" }}>
+              style={{ background: "rgba(245,158,11,0.08)", borderBottom: "1px solid rgba(245,158,11,0.2)", color: "#92400e" }}>
               <Icon name="TriangleAlert" size={12} style={{ color: "#F59E0B" }} />
               <span>Modifications non sauvegardées — le portal live affiche encore l'ancienne version.</span>
               <button onClick={doSave} className="ml-auto font-semibold underline hover:no-underline" style={{ color: "#F59E0B" }}>
@@ -515,7 +512,7 @@ export default function PortalEditorPage() {
 const LAYOUTS = [
   { key: "classic", label: "Classic" },
   { key: "minimal", label: "Minimal" },
-  { key: "bold",    label: "Bold"    },
+  { key: "bold", label: "Bold" },
   { key: "sidebar", label: "Sidebar" },
   { key: "compact", label: "Compact" },
 ] as const;
@@ -532,16 +529,14 @@ function LayoutPicker({ value, brandColor, onChange }: {
           <button
             key={layout.key}
             onClick={() => onChange(layout.key)}
-            className={`flex flex-col items-center gap-1.5 py-2 px-1 rounded-lg border-2 transition ${
-              value === layout.key
+            className={`flex flex-col items-center gap-1.5 py-2 px-1 rounded-lg border-2 transition ${value === layout.key
                 ? "border-accent bg-accent/5"
                 : "border-transparent hover:border-border"
-            }`}
+              }`}
           >
             <LayoutThumb layout={layout.key} brandColor={brandColor} active={value === layout.key} />
-            <span className={`text-[9.5px] font-semibold leading-tight text-center ${
-              value === layout.key ? "text-accent" : "text-muted"
-            }`}>
+            <span className={`text-[9.5px] font-semibold leading-tight text-center ${value === layout.key ? "text-accent" : "text-muted"
+              }`}>
               {layout.label}
             </span>
           </button>
@@ -552,7 +547,7 @@ function LayoutPicker({ value, brandColor, onChange }: {
 }
 
 function LayoutThumb({ layout, brandColor, active }: { layout: string; brandColor: string; active: boolean }) {
-  const c       = active ? brandColor : "#c4c4d0";
+  const c = active ? brandColor : "#c4c4d0";
   const surface = "#f4f6fa";
 
   if (layout === "classic") return (
@@ -596,7 +591,7 @@ function LayoutThumb({ layout, brandColor, active }: { layout: string; brandColo
         <div style={{ position: "absolute", top: -3, right: -3, width: 10, height: 10, borderRadius: "50%", background: "rgba(255,255,255,0.2)" }} />
         <div style={{ height: 2.5, width: 14, borderRadius: 99, background: "rgba(255,255,255,0.95)", marginBottom: 2.5, position: "relative" }} />
         <div style={{ display: "flex", gap: 1.5, position: "relative" }}>
-          {[0,1,2,3,4].map(i => <div key={i} style={{ flex: 1, height: 1.5, borderRadius: 99, background: i === 0 ? "#fff" : "rgba(255,255,255,0.4)" }} />)}
+          {[0, 1, 2, 3, 4].map(i => <div key={i} style={{ flex: 1, height: 1.5, borderRadius: 99, background: i === 0 ? "#fff" : "rgba(255,255,255,0.4)" }} />)}
         </div>
       </div>
       <div style={{ flex: 1, margin: "-3px 3px 3px", borderRadius: 4, background: "#fff", border: "1px solid #e6e6ec", boxShadow: `0 2px 8px -2px ${c}40` }} />
@@ -607,7 +602,7 @@ function LayoutThumb({ layout, brandColor, active }: { layout: string; brandColo
     <div style={{ width: 42, height: 32, borderRadius: 6, overflow: "hidden", border: "1px solid #e6e6ec", background: surface, display: "flex" }}>
       <div style={{ width: 14, flexShrink: 0, background: "#fff", borderRight: "1px solid #e6e6ec", padding: "3px 2px", display: "flex", flexDirection: "column", gap: 1.5 }}>
         <div style={{ width: 4, height: 4, borderRadius: 1.5, background: c, marginBottom: 1 }} />
-        {[0,1,2,3].map(i => (
+        {[0, 1, 2, 3].map(i => (
           <div key={i} style={{ display: "flex", alignItems: "center", gap: 1.5, height: 2.5, paddingLeft: 1, background: i === 0 ? `${c}25` : "transparent", borderRadius: 1.5 }}>
             <div style={{ width: 1.5, height: 1.5, borderRadius: "50%", background: i === 0 ? c : "#d8dce5" }} />
             <div style={{ flex: 1, height: 1, borderRadius: 99, background: i === 0 ? c : "#d8dce5", opacity: i === 0 ? 1 : 0.6 }} />
@@ -642,30 +637,30 @@ function LayoutThumb({ layout, brandColor, active }: { layout: string; brandColo
 type SetFn = <K extends keyof EditorSettings>(k: K, v: EditorSettings[K]) => void;
 
 const STEP_DEFS = [
-  { n: 1, titleKey: "labelFindOrder",  descKey: "descFindOrder",  extra: [{ key: "labelCta",    placeholder: "Find Order",            label: "CTA button" }] },
-  { n: 2, titleKey: "labelSelectItems",descKey: "descSelectItems", extra: [] },
-  { n: 3, titleKey: "labelReasons",    descKey: "descReasons",    extra: [] },
+  { n: 1, titleKey: "labelFindOrder", descKey: "descFindOrder", extra: [{ key: "labelCta", placeholder: "Find Order", label: "CTA button" }] },
+  { n: 2, titleKey: "labelSelectItems", descKey: "descSelectItems", extra: [] },
+  { n: 3, titleKey: "labelReasons", descKey: "descReasons", extra: [] },
   { n: 4, titleKey: "labelRefundType", descKey: "descRefundType", extra: [] },
-  { n: 5, titleKey: "labelConfirm",    descKey: "descConfirm",    extra: [{ key: "labelSubmit", placeholder: "Submit Return Request", label: "Submit button" }] },
+  { n: 5, titleKey: "labelConfirm", descKey: "descConfirm", extra: [{ key: "labelSubmit", placeholder: "Submit Return Request", label: "Submit button" }] },
 ] as const;
 
-const TITLE_PLACEHOLDERS: Record<string,string> = {
-  labelFindOrder:  "Find your order",
-  labelSelectItems:"Select items to return",
-  labelReasons:    "Tell us why",
+const TITLE_PLACEHOLDERS: Record<string, string> = {
+  labelFindOrder: "Find your order",
+  labelSelectItems: "Select items to return",
+  labelReasons: "Tell us why",
   labelRefundType: "How would you like to be refunded?",
-  labelConfirm:    "Review & submit",
+  labelConfirm: "Review & submit",
 };
-const DESC_PLACEHOLDERS: Record<string,string> = {
-  descFindOrder:   "Enter your order number and the email used at checkout.",
+const DESC_PLACEHOLDERS: Record<string, string> = {
+  descFindOrder: "Enter your order number and the email used at checkout.",
   descSelectItems: "Select the items you'd like to return.",
-  descReasons:     "Help us understand why you're returning each item.",
-  descRefundType:  "Choose the option that works best for you.",
-  descConfirm:     "One last look before we send this.",
+  descReasons: "Help us understand why you're returning each item.",
+  descRefundType: "Choose the option that works best for you.",
+  descConfirm: "One last look before we send this.",
 };
 
 function TextsSection({ s, set, isPro }: { s: EditorSettings; set: SetFn; isPro: boolean }) {
-  const [tab, setTab]           = useState<"steps" | "general">("steps");
+  const [tab, setTab] = useState<"steps" | "general">("steps");
   const [editStep, setEditStep] = useState(1);
 
   const def = STEP_DEFS[editStep - 1];
@@ -678,9 +673,8 @@ function TextsSection({ s, set, isPro }: { s: EditorSettings; set: SetFn; isPro:
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`flex-1 h-7 rounded-md text-[12px] font-semibold transition capitalize ${
-              tab === t ? "bg-surface shadow-sm text-ink" : "text-muted hover:text-ink"
-            }`}
+            className={`flex-1 h-7 rounded-md text-[12px] font-semibold transition capitalize ${tab === t ? "bg-surface shadow-sm text-ink" : "text-muted hover:text-ink"
+              }`}
           >
             {t === "steps" ? "Steps" : "General"}
           </button>
@@ -695,11 +689,10 @@ function TextsSection({ s, set, isPro }: { s: EditorSettings; set: SetFn; isPro:
               <button
                 key={d.n}
                 onClick={() => setEditStep(d.n)}
-                className={`flex-1 h-7 rounded-md text-[11.5px] font-semibold border transition ${
-                  editStep === d.n
+                className={`flex-1 h-7 rounded-md text-[11.5px] font-semibold border transition ${editStep === d.n
                     ? "bg-surface border-border shadow-sm text-ink"
                     : "border-transparent text-muted hover:border-border/60 hover:text-ink"
-                }`}
+                  }`}
               >
                 {d.n}
               </button>
@@ -766,8 +759,8 @@ function TextsSection({ s, set, isPro }: { s: EditorSettings; set: SetFn; isPro:
             <LabelField
               label="Powered-by text"
               hint={isPro ? "Leave empty to hide (white-label)" : "Pro plan required to customize or hide"}
-              value={isPro ? s.labelPoweredBy : "Secured by ReturnFlow"}
-              placeholder="Secured by ReturnFlow"
+              value={isPro ? s.labelPoweredBy : "Secured by TrackBack"}
+              placeholder="Secured by TrackBack"
               onChange={v => isPro && set("labelPoweredBy", v)}
             />
             {!isPro && (
@@ -798,7 +791,7 @@ function AccordionSection({
           <span className="text-[13px] font-semibold text-ink">{title}</span>
           {badge && (
             <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ring-1 ring-inset"
-                  style={{ background: 'rgba(108,99,255,0.14)', color: '#8B85FF', borderColor: 'rgba(108,99,255,0.25)' }}>
+              style={{ background: 'rgba(108,99,255,0.14)', color: '#8B85FF', borderColor: 'rgba(108,99,255,0.25)' }}>
               {badge}
             </span>
           )}
@@ -837,8 +830,8 @@ function PortalPreview({ settings: s, step, shop, device, chatEnabled }: {
 }) {
   const wrapStyle: React.CSSProperties = {
     position: "relative", // anchor for the chat bubble overlay
-    borderLeft:   "1px solid #e6e6ec",
-    borderRight:  "1px solid #e6e6ec",
+    borderLeft: "1px solid #e6e6ec",
+    borderRight: "1px solid #e6e6ec",
     borderBottom: "1px solid #e6e6ec",
     borderRadius: device === "mobile" ? "0 0 1.5rem 1.5rem" : "0 0 0.625rem 0.625rem",
     overflow: "hidden",
@@ -849,7 +842,7 @@ function PortalPreview({ settings: s, step, shop, device, chatEnabled }: {
   const layouts: Record<string, React.FC<{ s: EditorSettings; step: number; shop: string }>> = {
     classic: PreviewClassic,
     minimal: PreviewMinimal,
-    bold:    PreviewBold,
+    bold: PreviewBold,
     sidebar: PreviewSidebar,
     compact: PreviewCompact,
   };
@@ -912,7 +905,7 @@ function HStepper({ s, step, labels, light = false }: { s: EditorSettings; step:
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
       {labels.map((label, i) => {
-        const idx    = i + 1;
+        const idx = i + 1;
         const isDone = idx < step;
         const isCurr = idx === step;
 
@@ -931,8 +924,8 @@ function HStepper({ s, step, labels, light = false }: { s: EditorSettings; step:
             : (light ? "rgba(255,255,255,0.55)" : "#94a3b8");
         const dotShadow = isCurr
           ? (light
-              ? "0 0 0 4px rgba(255,255,255,0.18), 0 4px 12px -2px rgba(0,0,0,0.15)"
-              : `0 0 0 4px ${s.brandColor}24, 0 4px 12px -2px rgba(15,17,23,0.18)`)
+            ? "0 0 0 4px rgba(255,255,255,0.18), 0 4px 12px -2px rgba(0,0,0,0.15)"
+            : `0 0 0 4px ${s.brandColor}24, 0 4px 12px -2px rgba(15,17,23,0.18)`)
           : isDone
             ? `0 2px 6px -2px ${s.brandColor}55`
             : "none";
@@ -1028,7 +1021,7 @@ function PreviewClassic({ s, step, shop }: { s: EditorSettings; step: number; sh
         <div style={{ textAlign: "center", fontSize: 11.5, color: "#94a3b8", marginTop: 18 }}>
           Need help? <span style={{ textDecoration: "underline", color: s.brandColor, fontWeight: 500 }}>{s.footerContact || `support@${shop.split(".")[0]}.com`}</span>
           <div style={{ marginTop: 5, fontSize: 10.5, color: "#cbd5e1", display: "inline-flex", alignItems: "center", gap: 4 }}>
-            <span>🔒</span> {s.labelPoweredBy || "Secured by ReturnFlow"}
+            <span>🔒</span> {s.labelPoweredBy || "Secured by TrackBack"}
           </div>
         </div>
       </div>
@@ -1067,7 +1060,7 @@ function PreviewMinimal({ s, step, shop }: { s: EditorSettings; step: number; sh
       <div style={{ maxWidth: 540, margin: "0 auto", padding: "0 28px 32px" }}>
         <StepContent s={s} step={step} />
         <div style={{ textAlign: "center", fontSize: 10, color: "#cbd5e1", marginTop: 26, letterSpacing: "0.05em", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
-          <span>🔒</span> {s.labelPoweredBy || "Secured by ReturnFlow"}
+          <span>🔒</span> {s.labelPoweredBy || "Secured by TrackBack"}
         </div>
       </div>
     </div>
@@ -1126,7 +1119,7 @@ function PreviewBold({ s, step, shop }: { s: EditorSettings; step: number; shop:
         </div>
         <div style={{ textAlign: "center", fontSize: 11.5, color: "#94a3b8", marginTop: 18 }}>
           Need help? <span style={{ textDecoration: "underline", color: s.brandColor, fontWeight: 500 }}>{s.footerContact || `support@${shop.split(".")[0]}.com`}</span>
-          <div style={{ marginTop: 5, fontSize: 10.5, color: "#cbd5e1" }}>🔒 {s.labelPoweredBy || "Secured by ReturnFlow"}</div>
+          <div style={{ marginTop: 5, fontSize: 10.5, color: "#cbd5e1" }}>🔒 {s.labelPoweredBy || "Secured by TrackBack"}</div>
         </div>
       </div>
     </div>
@@ -1172,7 +1165,7 @@ function PreviewSidebar({ s, step, shop }: { s: EditorSettings; step: number; sh
         </div>
         <div style={{ flex: 1 }}>
           {STEP_LABELS_DEFAULT.map((label, i) => {
-            const idx  = i + 1;
+            const idx = i + 1;
             const done = idx < step;
             const curr = idx === step;
             return (
@@ -1209,7 +1202,7 @@ function PreviewSidebar({ s, step, shop }: { s: EditorSettings; step: number; sh
             <span>←</span> {s.labelBackToStore || "Back to store"}
           </div>
           <div style={{ fontSize: 9.5, color: "#cbd5e1", display: "flex", alignItems: "center", gap: 4 }}>
-            <span>🔒</span> {s.labelPoweredBy || "Secured by ReturnFlow"}
+            <span>🔒</span> {s.labelPoweredBy || "Secured by TrackBack"}
           </div>
         </div>
       </div>
@@ -1293,7 +1286,7 @@ function PreviewCompact({ s, step, shop }: { s: EditorSettings; step: number; sh
           <StepContent s={s} step={step} />
         </div>
         <div style={{ textAlign: "center", fontSize: 10, color: "#cbd5e1", marginTop: 12, display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
-          <span>🔒</span> {s.labelPoweredBy || "Secured by ReturnFlow"}
+          <span>🔒</span> {s.labelPoweredBy || "Secured by TrackBack"}
         </div>
       </div>
     </div>
@@ -1378,8 +1371,8 @@ function PreviewStep3({ s }: { s: EditorSettings }) {
 function PreviewStep4({ s }: { s: EditorSettings }) {
   const opts = [
     { icon: "CreditCard", label: "Refund to original payment", desc: "5–10 business days", sel: true },
-    { icon: "Gift",       label: "Store credit",               desc: "Available instantly",         sel: false },
-    { icon: "RefreshCw",  label: "Exchange for another item",  desc: "Once we receive your return", sel: false },
+    { icon: "Gift", label: "Store credit", desc: "Available instantly", sel: false },
+    { icon: "RefreshCw", label: "Exchange for another item", desc: "Once we receive your return", sel: false },
   ];
   return (
     <div>

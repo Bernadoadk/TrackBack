@@ -26,7 +26,7 @@ Retourne dans l'interface de l'application dans ton Shopify Admin.
 *   Clique sur la ligne pour ouvrir les détails.
 *   **Approuve le retour** : Dans la fenêtre qui s'ouvre, saisis un transporteur (ex: DHL) et un numéro de suivi fictif.
 *   **Réception** : Une fois approuvé, clique sur "Mark as Received" quand tu as "reçu" le colis.
-*   **Remboursement** : Clique sur "Issue Refund". Comme le client a choisi "Store Credit", ReturnFlow va appeler l'API Shopify pour créer un code promo automatiquement. Vérifie que le code apparaît bien dans les notes internes.
+*   **Remboursement** : Clique sur "Issue Refund". Comme le client a choisi "Store Credit", TrackBack va appeler l'API Shopify pour créer un code promo automatiquement. Vérifie que le code apparaît bien dans les notes internes.
 
 ### 5. Étape 4 : Analyse et Facturation
 *   Va dans l'onglet **Analytics**. Tu devrais voir un pic dans le graphique "Returns Over Time" et la raison du retour apparaître dans le diagramme circulaire.

@@ -10,16 +10,19 @@ import { isBillingTestMode, syncBillingFromShopify } from "../lib/plan.server";
 const ANNUAL_DISCOUNT_PCT = 20;
 
 const PLANS = [
-  { id: 'free',    name: 'Free',    price: 0,  unit: 'forever', monthlyLimit: 10,
+  {
+    id: 'free', name: 'Free', price: 0, unit: 'forever', monthlyLimit: 10,
     summary: '10 returns / month',
     features: ['Customer return portal', 'Email notifications', 'Basic analytics', 'Up to 10 returns/month'],
   },
-  { id: 'starter', name: 'Starter', price: 19, unit: 'month',   monthlyLimit: 100, popular: true,
+  {
+    id: 'starter', name: 'Starter', price: 19, unit: 'month', monthlyLimit: 100, popular: true,
     annualId: 'starter_annual', annualName: 'Starter Annual', annualPrice: 182,
     summary: '100 returns / month',
     features: ['Everything in Free', 'Custom branding & logo', 'Advanced analytics', 'Email templates', 'Priority support'],
   },
-  { id: 'pro',     name: 'Pro',     price: 49, unit: 'month',   monthlyLimit: 999999,
+  {
+    id: 'pro', name: 'Pro', price: 49, unit: 'month', monthlyLimit: 999999,
     annualId: 'pro_annual', annualName: 'Pro Annual', annualPrice: 470,
     summary: 'Unlimited returns',
     features: ['Everything in Starter', 'Live chat with customers', 'API access & webhooks', 'Custom return reasons', 'White-label portal', 'Dedicated CSM'],
@@ -284,7 +287,7 @@ export default function BillingPage() {
               </div>
               <div className="h-2 rounded-full bg-bg overflow-hidden">
                 <div className="h-full rounded-full transition-all duration-700"
-                     style={{ width: pct + '%', background: isNearLimit ? 'linear-gradient(90deg,#F59E0B,#EF4444)' : 'linear-gradient(90deg,#6C63FF,#8B85FF)' }} />
+                  style={{ width: pct + '%', background: isNearLimit ? 'linear-gradient(90deg,#F59E0B,#EF4444)' : 'linear-gradient(90deg,#6C63FF,#8B85FF)' }} />
               </div>
               {isNearLimit && (
                 <div className="text-[11px] text-warn mt-1.5 flex items-center gap-1">
@@ -314,18 +317,16 @@ export default function BillingPage() {
           <button
             type="button"
             onClick={() => setBillingCycle('monthly')}
-            className={`px-4 h-8 rounded-full text-[12.5px] font-semibold transition-all ${
-              billingCycle === 'monthly' ? 'bg-surface text-ink shadow-sm' : 'text-muted hover:text-ink'
-            }`}
+            className={`px-4 h-8 rounded-full text-[12.5px] font-semibold transition-all ${billingCycle === 'monthly' ? 'bg-surface text-ink shadow-sm' : 'text-muted hover:text-ink'
+              }`}
           >
             Monthly
           </button>
           <button
             type="button"
             onClick={() => setBillingCycle('annual')}
-            className={`px-4 h-8 rounded-full text-[12.5px] font-semibold transition-all flex items-center gap-1.5 ${
-              billingCycle === 'annual' ? 'bg-surface text-ink shadow-sm' : 'text-muted hover:text-ink'
-            }`}
+            className={`px-4 h-8 rounded-full text-[12.5px] font-semibold transition-all flex items-center gap-1.5 ${billingCycle === 'annual' ? 'bg-surface text-ink shadow-sm' : 'text-muted hover:text-ink'
+              }`}
           >
             Annual
             <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: 'rgba(34,197,94,0.18)', color: '#22C55E' }}>
@@ -345,16 +346,15 @@ export default function BillingPage() {
           const targetId = showAnnual ? p.annualId! : p.id;
           const targetName = showAnnual ? p.annualName! : p.name;
           const isCurrent = (currentPlan.id === p.id && !isAnnualActive && !showAnnual) ||
-                            (currentPlan.id === p.id && isAnnualActive && showAnnual);
+            (currentPlan.id === p.id && isAnnualActive && showAnnual);
           const monthlyEquivalent = showAnnual ? p.price : null;
           return (
             <div key={p.id}
-                 className={`relative bg-surface border rounded-xl p-6 flex flex-col transition-all ${
-                   isPop ? 'border-accent shadow-[0_0_0_1px_rgba(108,99,255,0.5),0_12px_40px_rgba(108,99,255,0.18)]' : 'border-border hover:border-[#3a3e58]'
-                 }`}>
+              className={`relative bg-surface border rounded-xl p-6 flex flex-col transition-all ${isPop ? 'border-accent shadow-[0_0_0_1px_rgba(108,99,255,0.5),0_12px_40px_rgba(108,99,255,0.18)]' : 'border-border hover:border-[#3a3e58]'
+                }`}>
               {isPop && (
                 <div className="absolute -top-2.5 left-1/2 -translate-x-1/2 text-[10.5px] font-bold px-2.5 py-1 rounded-full text-white tracking-wide"
-                     style={{ background: 'linear-gradient(90deg,#6C63FF,#8B5CF6)', boxShadow: '0 4px 12px rgba(108,99,255,0.4)' }}>
+                  style={{ background: 'linear-gradient(90deg,#6C63FF,#8B5CF6)', boxShadow: '0 4px 12px rgba(108,99,255,0.4)' }}>
                   ⭐ MOST POPULAR
                 </div>
               )}
@@ -397,12 +397,12 @@ export default function BillingPage() {
                   </button>
                 ) : isPop ? (
                   <Btn variant="primary" className="w-full" size="lg" disabled={isSaving}
-                       onClick={() => handleUpgrade(targetId)}>
+                    onClick={() => handleUpgrade(targetId)}>
                     {isSaving ? 'Redirecting...' : `Upgrade to ${targetName}`}
                   </Btn>
                 ) : (
                   <Btn variant="secondary" className="w-full" size="lg" disabled={isSaving}
-                       onClick={() => handleUpgrade(targetId)}>
+                    onClick={() => handleUpgrade(targetId)}>
                     {isSaving ? 'Redirecting...' : `Upgrade to ${targetName}`}
                   </Btn>
                 )}
@@ -413,7 +413,7 @@ export default function BillingPage() {
       </div>
 
       <div className="text-center text-[12.5px] text-muted mb-8 flex items-center justify-center gap-1.5">
-        <Icon name="Shield" size={13} className="text-accent2"/>
+        <Icon name="Shield" size={13} className="text-accent2" />
         <span>Cancel anytime. No trial period.</span>
       </div>
 
@@ -427,7 +427,7 @@ export default function BillingPage() {
           variant="secondary"
           size="sm"
           icon="MessageCircleMore"
-          onClick={() => window.dispatchEvent(new Event('returnflow:open-support-chat'))}
+          onClick={() => window.dispatchEvent(new Event('TrackBack:open-support-chat'))}
         >
           Contact us
         </Btn>

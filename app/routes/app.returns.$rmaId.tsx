@@ -89,8 +89,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         source: 'merchant',
         title: eventTitle[status] ?? `Status: ${status}`,
         detail: status === 'REJECTED' ? (reason || null)
-              : status === 'SHIPPED' ? (trackingNumber ? `Tracking ${trackingNumber}` : 'Marked as shipped')
-              : null,
+          : status === 'SHIPPED' ? (trackingNumber ? `Tracking ${trackingNumber}` : 'Marked as shipped')
+            : null,
         meta: (carrier || trackingNumber)
           ? JSON.stringify({ carrier, trackingNumber, trackingUrl })
           : null,
@@ -264,7 +264,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         return { error: `Failed to issue refund: ${e?.message || 'unknown error'}` };
       }
 
-    // ─── STORE_CREDIT (modern: storeCreditAccountCredit) ──────────────────
+      // ─── STORE_CREDIT (modern: storeCreditAccountCredit) ──────────────────
     } else if (refundMethod === 'STORE_CREDIT') {
       try {
         const order = await fetchOrderContext();
@@ -319,7 +319,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
               input: {
                 orderId: rr.orderId,
                 refundLineItems,
-                note: `Store credit issued via ReturnFlow (${rr.rma})`,
+                note: `Store credit issued via TrackBack (${rr.rma})`,
                 notify: false,
               }
             }
@@ -332,7 +332,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         return { error: `Failed to create store credit: ${e?.message || 'unknown error'}` };
       }
 
-    // ─── EXCHANGE (draft order + invoice email) ───────────────────────────
+      // ─── EXCHANGE (draft order + invoice email) ───────────────────────────
     } else if (refundMethod === 'EXCHANGE') {
       try {
         const draftOrderRes = await admin.graphql(`#graphql
@@ -419,8 +419,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         source: 'merchant',
         title:
           refundMethod === 'EXCHANGE' ? 'Exchange order created'
-          : refundMethod === 'STORE_CREDIT' ? 'Store credit issued'
-          : 'Refund issued',
+            : refundMethod === 'STORE_CREDIT' ? 'Store credit issued'
+              : 'Refund issued',
         detail: `$${refundAmount.toFixed(2)} · ${REFUND_TYPES[refundMethod]?.label ?? refundMethod}`,
         meta: JSON.stringify({ refundId, storeCreditTxId, exchangeOrderId, exchangeOrderUrl }),
       }
@@ -468,9 +468,9 @@ export default function ReturnDetailPage() {
   const r = returnRequest;
 
   const [approveOpen, setApproveOpen] = useState(false);
-  const [rejectOpen,  setRejectOpen]  = useState(false);
-  const [refundOpen,  setRefundOpen]  = useState(false);
-  const [shipOpen,    setShipOpen]    = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [refundOpen, setRefundOpen] = useState(false);
+  const [shipOpen, setShipOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [internalNote, setInternalNote] = useState('');
   const [overrideMethod, setOverrideMethod] = useState(false);
@@ -527,11 +527,11 @@ export default function ReturnDetailPage() {
   const restocking = 0;
   const refund = itemsTotal - restocking;
 
-  const isPending  = r.status === 'PENDING';
+  const isPending = r.status === 'PENDING';
   const isApproved = r.status === 'APPROVED';
-  const isShipped  = r.status === 'SHIPPED';
+  const isShipped = r.status === 'SHIPPED';
   const isReceived = r.status === 'RECEIVED';
-  const isClosed   = ['REFUNDED', 'REJECTED', 'EXPIRED'].includes(r.status);
+  const isClosed = ['REFUNDED', 'REJECTED', 'EXPIRED'].includes(r.status);
 
   const handleApprove = () => {
     fetcher.submit({
@@ -578,7 +578,7 @@ export default function ReturnDetailPage() {
   const timeline: any[] = [
     { title: 'Return Requested', detail: 'Customer submitted return request', time: fmt(r.createdAt), icon: 'PackagePlus', color: '#22C55E' },
   ];
-  if (r.approvedAt || ['APPROVED','SHIPPED','RECEIVED','REFUNDED'].includes(r.status)) {
+  if (r.approvedAt || ['APPROVED', 'SHIPPED', 'RECEIVED', 'REFUNDED'].includes(r.status)) {
     timeline.push({ title: 'Return Approved', detail: 'Shipping instructions sent to customer', time: fallback(r.approvedAt), icon: 'CircleCheck', color: '#3B82F6' });
   }
   if (r.rejectedAt || r.status === 'REJECTED') {
@@ -587,7 +587,7 @@ export default function ReturnDetailPage() {
   if (r.status === 'EXPIRED') {
     timeline.push({ title: 'Return Expired', detail: 'Customer did not ship within the allowed window', time: fmt(r.updatedAt), icon: 'Clock', color: '#6B7280' });
   }
-  if (r.shippedAt || ['SHIPPED','RECEIVED','REFUNDED'].includes(r.status)) {
+  if (r.shippedAt || ['SHIPPED', 'RECEIVED', 'REFUNDED'].includes(r.status)) {
     const carrierName = getCarrierDisplayName(r.carrier);
     const detail = r.trackingNumber
       ? `${carrierName} · ${r.trackingNumber}`
@@ -604,7 +604,7 @@ export default function ReturnDetailPage() {
   // Insert any carrier events (IN_TRANSIT, OUT_FOR_DELIVERY, DELIVERED) that came between
   // shipped and received (typically from AfterShip webhook integration when configured).
   (r.events || [])
-    .filter((e: any) => ['IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERED'].includes(e.type))
+    .filter((e: any) => ['IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(e.type))
     .forEach((e: any) => {
       timeline.push({
         title: e.title,
@@ -614,7 +614,7 @@ export default function ReturnDetailPage() {
         color: e.type === 'DELIVERED' ? '#8B5CF6' : '#10B981',
       });
     });
-  if (r.receivedAt || ['RECEIVED','REFUNDED'].includes(r.status)) {
+  if (r.receivedAt || ['RECEIVED', 'REFUNDED'].includes(r.status)) {
     timeline.push({ title: 'Items Received', detail: 'Items confirmed at warehouse', time: fallback(r.receivedAt), icon: 'PackageCheck', color: '#8B5CF6' });
   }
   if (r.refundedAt || r.status === 'REFUNDED') {
@@ -650,17 +650,17 @@ export default function ReturnDetailPage() {
           <Card title="Customer">
             <div className="flex items-start gap-4">
               <div className="w-12 h-12 rounded-full grid place-content-center text-[14px] font-bold text-white shrink-0"
-                   style={{ background: 'linear-gradient(135deg,#6C63FF,#8B5CF6)' }}>
-                {r.customerName ? r.customerName.split(' ').map((p: string) => p[0]).slice(0,2).join('').toUpperCase() : r.customerEmail[0].toUpperCase()}
+                style={{ background: 'linear-gradient(135deg,#6C63FF,#8B5CF6)' }}>
+                {r.customerName ? r.customerName.split(' ').map((p: string) => p[0]).slice(0, 2).join('').toUpperCase() : r.customerEmail[0].toUpperCase()}
               </div>
               <div className="flex-1 grid grid-cols-2 gap-x-6 gap-y-2.5 text-[13px]">
                 <div className="col-span-2">
                   <div className="text-ink font-semibold text-[14px]">{r.customerName || r.customerEmail.split('@')[0]}</div>
                 </div>
-                <Field icon="Mail"     label="Email"   value={r.customerEmail} />
-                <Field icon="Phone"    label="Phone"   value={r.customerPhone || 'N/A'} />
-                <Field icon="Receipt"  label="Order"   value={<a className="text-accent2 hover:text-white cursor-pointer">{r.orderName}</a>} />
-                <Field icon="Calendar" label="Date"    value={new Date(r.orderDate).toLocaleDateString()} />
+                <Field icon="Mail" label="Email" value={r.customerEmail} />
+                <Field icon="Phone" label="Phone" value={r.customerPhone || 'N/A'} />
+                <Field icon="Receipt" label="Order" value={<a className="text-accent2 hover:text-white cursor-pointer">{r.orderName}</a>} />
+                <Field icon="Calendar" label="Date" value={new Date(r.orderDate).toLocaleDateString()} />
               </div>
             </div>
           </Card>
@@ -709,7 +709,7 @@ export default function ReturnDetailPage() {
                 {timeline.map((t, i) => (
                   <div key={i} className="flex items-start gap-3 relative">
                     <div className="w-[22px] h-[22px] rounded-full grid place-content-center shrink-0 relative z-10 border-[3px] border-surface"
-                         style={{ background: t.color }}>
+                      style={{ background: t.color }}>
                       <Icon name={t.icon} size={11} className="text-white" strokeWidth={2.5} />
                     </div>
                     <div className="flex-1 min-w-0 pt-0.5">
@@ -720,7 +720,7 @@ export default function ReturnDetailPage() {
                       <div className="text-[12.5px] text-muted mt-0.5">{t.detail}</div>
                       {t.trackingUrl && (
                         <a href={t.trackingUrl} target="_blank" rel="noopener noreferrer"
-                           className="inline-flex items-center gap-1.5 mt-1.5 text-[12px] text-accent2 hover:text-white transition group">
+                          className="inline-flex items-center gap-1.5 mt-1.5 text-[12px] text-accent2 hover:text-white transition group">
                           <Icon name="ExternalLink" size={12} />
                           <span>Track live</span>
                           <span className="opacity-0 group-hover:opacity-100 transition">→</span>
@@ -728,7 +728,7 @@ export default function ReturnDetailPage() {
                       )}
                       {t.exchangeUrl && (
                         <a href={t.exchangeUrl} target="_blank" rel="noopener noreferrer"
-                           className="inline-flex items-center gap-1.5 mt-1.5 text-[12px] text-accent2 hover:text-white transition group">
+                          className="inline-flex items-center gap-1.5 mt-1.5 text-[12px] text-accent2 hover:text-white transition group">
                           <Icon name="ExternalLink" size={12} />
                           <span>View exchange invoice</span>
                           <span className="opacity-0 group-hover:opacity-100 transition">→</span>
@@ -822,7 +822,7 @@ export default function ReturnDetailPage() {
             )}
             {isClosed && (
               <div className="px-3 py-3 rounded-md text-[12.5px]"
-                   style={{ background: STATUS_STYLES[r.status]?.bg || '#333', color: STATUS_STYLES[r.status]?.text || '#fff' }}>
+                style={{ background: STATUS_STYLES[r.status]?.bg || '#333', color: STATUS_STYLES[r.status]?.text || '#fff' }}>
                 This return is {r.status === 'EXPIRED' ? 'expired' : 'closed'}. No further actions available.
               </div>
             )}
@@ -831,8 +831,8 @@ export default function ReturnDetailPage() {
           {/* Refund preview */}
           <Card title="Refund Preview">
             <div className="space-y-2 text-[13px]">
-              <Row label="Items total"      value={`$${itemsTotal.toFixed(2)}`} />
-              <Row label="Restocking fee"   value={`-$${restocking.toFixed(2)}`} muted />
+              <Row label="Items total" value={`$${itemsTotal.toFixed(2)}`} />
+              <Row label="Restocking fee" value={`-$${restocking.toFixed(2)}`} muted />
               <div className="border-t border-divider my-2"></div>
               <Row label="Estimated refund" value={`$${refund.toFixed(2)}`} strong />
               <div className="flex items-center justify-between pt-1.5">
@@ -841,7 +841,7 @@ export default function ReturnDetailPage() {
                   const m = REFUND_TYPES[r.refundType as string] || REFUND_TYPES['ORIGINAL_PAYMENT'];
                   return (
                     <span className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-2 py-0.5 rounded"
-                          style={{ background: m.bg, color: m.color }}>
+                      style={{ background: m.bg, color: m.color }}>
                       <Icon name={m.icon} size={11} /> {m.label}
                     </span>
                   );
@@ -849,21 +849,21 @@ export default function ReturnDetailPage() {
               </div>
               {r.refundType === 'STORE_CREDIT' && r.settings.incentivizeStoreCredit && r.settings.storeCreditBonusPercent > 0 && (
                 <div className="px-2.5 py-1.5 rounded-md text-[11.5px] flex items-start gap-1.5"
-                     style={{ background: 'rgba(108,99,255,0.08)', color: '#8B85FF' }}>
+                  style={{ background: 'rgba(108,99,255,0.08)', color: '#8B85FF' }}>
                   <Icon name="Sparkles" size={11} className="mt-0.5" />
                   <span>+{r.settings.storeCreditBonusPercent}% bonus credit · total <strong className="text-ink">${(refund * (1 + r.settings.storeCreditBonusPercent / 100)).toFixed(2)}</strong></span>
                 </div>
               )}
               {r.refundType === 'EXCHANGE' && (r as any).exchangeNote && (
                 <div className="px-2.5 py-2 rounded-md text-[12px] flex items-start gap-1.5 border"
-                     style={{ background: 'rgba(59,130,246,0.06)', color: '#3B82F6', borderColor: 'rgba(59,130,246,0.2)' }}>
+                  style={{ background: 'rgba(59,130,246,0.06)', color: '#3B82F6', borderColor: 'rgba(59,130,246,0.2)' }}>
                   <Icon name="RefreshCw" size={12} className="mt-0.5 shrink-0" />
                   <div><span className="font-semibold">Customer wants: </span>{(r as any).exchangeNote}</div>
                 </div>
               )}
               {r.refundType === 'EXCHANGE' && (r as any).exchangeOrderUrl && (
                 <div className="px-2.5 py-2 rounded-md text-[12px] flex items-start gap-1.5 border"
-                     style={{ background: 'rgba(16,185,129,0.06)', color: '#10B981', borderColor: 'rgba(16,185,129,0.2)' }}>
+                  style={{ background: 'rgba(16,185,129,0.06)', color: '#10B981', borderColor: 'rgba(16,185,129,0.2)' }}>
                   <Icon name="PackageCheck" size={12} className="mt-0.5 shrink-0" />
                   <div>
                     <span className="font-semibold">Shopify draft order created — </span>
@@ -877,16 +877,16 @@ export default function ReturnDetailPage() {
           {/* Shipping Info */}
           <Card title="Shipping Info">
             <div className="space-y-2.5 text-[13px]">
-              <Row label="Order"    value={<a className="text-accent2 hover:text-white cursor-pointer">{r.orderName}</a>} />
-              <Row label="Total"    value={`$${r.orderTotal.toFixed(2)}`} />
-              {r.carrier       && <Row label="Carrier"   value={r.carrier} />}
-              {r.trackingNumber && <Row label="Tracking"  value={r.trackingNumber} />}
-              {r.shippedAt     && <Row label="Shipped"   value={new Date(r.shippedAt).toLocaleDateString()} />}
+              <Row label="Order" value={<a className="text-accent2 hover:text-white cursor-pointer">{r.orderName}</a>} />
+              <Row label="Total" value={`$${r.orderTotal.toFixed(2)}`} />
+              {r.carrier && <Row label="Carrier" value={r.carrier} />}
+              {r.trackingNumber && <Row label="Tracking" value={r.trackingNumber} />}
+              {r.shippedAt && <Row label="Shipped" value={new Date(r.shippedAt).toLocaleDateString()} />}
               {r.labelUrl && (
                 <div className="flex items-center justify-between">
                   <span className="text-muted">Shipping Label</span>
                   <a href={r.labelUrl} target="_blank" rel="noreferrer"
-                     className="inline-flex items-center gap-1.5 text-accent2 hover:underline text-[12.5px] font-medium">
+                    className="inline-flex items-center gap-1.5 text-accent2 hover:underline text-[12.5px] font-medium">
                     <Icon name="Download" size={13} /> Download
                   </a>
                 </div>
@@ -895,7 +895,7 @@ export default function ReturnDetailPage() {
                 <div className="flex items-center justify-between">
                   <span className="text-muted">Exchange Order</span>
                   <a href={(r as any).exchangeOrderUrl} target="_blank" rel="noreferrer"
-                     className="inline-flex items-center gap-1.5 text-[#10B981] hover:underline text-[12.5px] font-medium">
+                    className="inline-flex items-center gap-1.5 text-[#10B981] hover:underline text-[12.5px] font-medium">
                     <Icon name="ExternalLink" size={13} /> View in Shopify
                   </a>
                 </div>
@@ -910,10 +910,10 @@ export default function ReturnDetailPage() {
 
       {/* APPROVE Modal */}
       <Modal open={approveOpen} onClose={() => setApproveOpen(false)} title="Approve this return?"
-             footer={<>
-               <Btn variant="ghost" onClick={() => setApproveOpen(false)}>Cancel</Btn>
-               <Btn variant="ok" icon="Check" onClick={handleApprove} disabled={fetcher.state !== 'idle'}>Approve & Send instructions</Btn>
-             </>}>
+        footer={<>
+          <Btn variant="ghost" onClick={() => setApproveOpen(false)}>Cancel</Btn>
+          <Btn variant="ok" icon="Check" onClick={handleApprove} disabled={fetcher.state !== 'idle'}>Approve & Send instructions</Btn>
+        </>}>
         <div className="space-y-4">
           <div className="text-[13px] text-muted leading-relaxed">
             The customer will be emailed shipping instructions. Optionally provide a prepaid label below.
@@ -934,24 +934,24 @@ export default function ReturnDetailPage() {
 
       {/* REJECT Modal */}
       <Modal open={rejectOpen} onClose={() => setRejectOpen(false)} title="Reject this return?"
-             footer={<>
-               <Btn variant="ghost" onClick={() => setRejectOpen(false)}>Cancel</Btn>
-               <Btn variant="danger" icon="X" onClick={handleReject} disabled={!rejectReason.trim() || fetcher.state !== 'idle'}>Reject & Notify</Btn>
-             </>}>
+        footer={<>
+          <Btn variant="ghost" onClick={() => setRejectOpen(false)}>Cancel</Btn>
+          <Btn variant="danger" icon="X" onClick={handleReject} disabled={!rejectReason.trim() || fetcher.state !== 'idle'}>Reject & Notify</Btn>
+        </>}>
         <div className="text-[13px] text-muted leading-relaxed mb-3">
           The customer will be notified that their return cannot be accepted.
         </div>
         <label className="text-[12px] font-medium text-muted block mb-1.5">Reason for rejection</label>
         <Textarea value={rejectReason} onChange={(e: any) => setRejectReason(e.target.value)} rows={4}
-                  placeholder="e.g. Outside 30-day return window; items show signs of wear." />
+          placeholder="e.g. Outside 30-day return window; items show signs of wear." />
       </Modal>
 
       {/* SHIPPED Modal */}
       <Modal open={shipOpen} onClose={() => setShipOpen(false)} title="Mark as Shipped"
-             footer={<>
-               <Btn variant="ghost" onClick={() => setShipOpen(false)}>Cancel</Btn>
-               <Btn variant="primary" icon="Truck" onClick={handleMarkShipped} disabled={fetcher.state !== 'idle'}>Confirm Shipped</Btn>
-             </>}>
+        footer={<>
+          <Btn variant="ghost" onClick={() => setShipOpen(false)}>Cancel</Btn>
+          <Btn variant="primary" icon="Truck" onClick={handleMarkShipped} disabled={fetcher.state !== 'idle'}>Confirm Shipped</Btn>
+        </>}>
         <div className="space-y-4">
           <div className="text-[13px] text-muted leading-relaxed">
             Confirm that the customer has shipped the items back. Add tracking info if available.
@@ -968,21 +968,21 @@ export default function ReturnDetailPage() {
 
       {/* REFUND Modal */}
       <Modal open={refundOpen} onClose={() => setRefundOpen(false)}
-             title={r.refundType === 'EXCHANGE' ? 'Process Exchange' : 'Process Refund'} width="max-w-lg"
-             footer={<>
-               <Btn variant="ghost" onClick={() => setRefundOpen(false)}>Cancel</Btn>
-               <Btn variant="primary" icon={r.refundType === 'EXCHANGE' ? 'RefreshCw' : 'DollarSign'} onClick={handleRefund} disabled={fetcher.state !== 'idle'}>
-                 {refundMethod === 'EXCHANGE' ? 'Create Exchange Order' : 'Confirm Refund'}
-               </Btn>
-             </>}>
+        title={r.refundType === 'EXCHANGE' ? 'Process Exchange' : 'Process Refund'} width="max-w-lg"
+        footer={<>
+          <Btn variant="ghost" onClick={() => setRefundOpen(false)}>Cancel</Btn>
+          <Btn variant="primary" icon={r.refundType === 'EXCHANGE' ? 'RefreshCw' : 'DollarSign'} onClick={handleRefund} disabled={fetcher.state !== 'idle'}>
+            {refundMethod === 'EXCHANGE' ? 'Create Exchange Order' : 'Confirm Refund'}
+          </Btn>
+        </>}>
         {(() => {
           const requested = REFUND_TYPES[r.refundType as string] || REFUND_TYPES['ORIGINAL_PAYMENT'];
           return (
             <div className="space-y-4">
               {onboardingIncomplete && (
                 <Link to="/app/onboarding"
-                      className="flex items-start gap-2.5 px-3 py-2.5 rounded-md border transition hover:bg-warn/15"
-                      style={{ background: 'rgba(245,158,11,0.08)', borderColor: 'rgba(245,158,11,0.25)' }}>
+                  className="flex items-start gap-2.5 px-3 py-2.5 rounded-md border transition hover:bg-warn/15"
+                  style={{ background: 'rgba(245,158,11,0.08)', borderColor: 'rgba(245,158,11,0.25)' }}>
                   <Icon name="TriangleAlert" size={14} className="mt-0.5 shrink-0" style={{ color: '#F59E0B' }} />
                   <div className="flex-1 text-[12.5px]">
                     <div className="font-semibold" style={{ color: '#F59E0B' }}>Setup incomplete</div>
@@ -996,7 +996,7 @@ export default function ReturnDetailPage() {
               <div>
                 <div className="text-[11px] uppercase tracking-wider text-faint font-semibold mb-1.5">Customer requested</div>
                 <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md"
-                     style={{ background: requested.bg, color: requested.color }}>
+                  style={{ background: requested.bg, color: requested.color }}>
                   <Icon name={requested.icon} size={14} />
                   <span className="text-[13px] font-semibold">{requested.label}</span>
                 </div>
@@ -1004,8 +1004,8 @@ export default function ReturnDetailPage() {
 
               <div className="p-3 rounded-md bg-bg/40 border border-divider">
                 <Toggle checked={overrideMethod} onChange={(v: boolean) => { setOverrideMethod(v); if (!v) setRefundMethod(r.refundType || 'ORIGINAL_PAYMENT'); }}
-                        label="Override refund method"
-                        description="Issue a different refund type than the customer requested." />
+                  label="Override refund method"
+                  description="Issue a different refund type than the customer requested." />
                 {overrideMethod && (
                   <div className="mt-3 grid grid-cols-3 gap-2 animate-fadeIn">
                     {['ORIGINAL_PAYMENT', 'STORE_CREDIT', 'EXCHANGE'].map(key => {
@@ -1028,13 +1028,13 @@ export default function ReturnDetailPage() {
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted text-[14px]">$</span>
                   <input value={refundAmountStr} onChange={e => setRefundAmountStr(e.target.value)}
-                         className="w-full h-10 pl-7 pr-3 text-[15px] rounded-md bg-bg border border-border text-ink font-semibold tabular-nums focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20" />
+                    className="w-full h-10 pl-7 pr-3 text-[15px] rounded-md bg-bg border border-border text-ink font-semibold tabular-nums focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20" />
                 </div>
               </div>
 
               {refundMethod === 'STORE_CREDIT' && (
                 <div className="p-3 rounded-md text-[12.5px] flex gap-2 items-start"
-                     style={{ background: 'rgba(108,99,255,0.10)', color: '#8B85FF' }}>
+                  style={{ background: 'rgba(108,99,255,0.10)', color: '#8B85FF' }}>
                   <Icon name="Info" size={14} className="mt-0.5 shrink-0" />
                   <div className="leading-relaxed">A Shopify gift card will be issued to the customer via <code>refundCreate</code> and sent by email.</div>
                 </div>
@@ -1043,13 +1043,13 @@ export default function ReturnDetailPage() {
                 <div className="space-y-3">
                   {(r as any).exchangeNote && (
                     <div className="p-3 rounded-md border text-[12.5px]"
-                         style={{ background: 'rgba(59,130,246,0.06)', borderColor: 'rgba(59,130,246,0.2)', color: '#3B82F6' }}>
+                      style={{ background: 'rgba(59,130,246,0.06)', borderColor: 'rgba(59,130,246,0.2)', color: '#3B82F6' }}>
                       <div className="font-semibold mb-1 flex items-center gap-1.5"><Icon name="MessageSquare" size={12} /> Customer requested:</div>
                       <div className="text-ink italic">"{(r as any).exchangeNote}"</div>
                     </div>
                   )}
                   <div className="p-3 rounded-md text-[12.5px] flex gap-2 items-start"
-                       style={{ background: 'rgba(59,130,246,0.08)', color: '#3B82F6' }}>
+                    style={{ background: 'rgba(59,130,246,0.08)', color: '#3B82F6' }}>
                     <Icon name="Info" size={14} className="mt-0.5 shrink-0" />
                     <div className="leading-relaxed">A Shopify draft order will be created with the return value applied as a discount credit. You can then edit it in Shopify admin to add the exact replacement item before completing it.</div>
                   </div>

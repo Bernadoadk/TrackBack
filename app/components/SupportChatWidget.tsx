@@ -36,11 +36,11 @@ export default function SupportChatWidget() {
   useEffect(() => setMounted(true), []);
 
   // Allow any page to imperatively open the support chat by dispatching
-  // `window.dispatchEvent(new Event('returnflow:open-support-chat'))`.
+  // `window.dispatchEvent(new Event('TrackBack:open-support-chat'))`.
   useEffect(() => {
     const handler = () => setOpen(true);
-    window.addEventListener('returnflow:open-support-chat', handler);
-    return () => window.removeEventListener('returnflow:open-support-chat', handler);
+    window.addEventListener('TrackBack:open-support-chat', handler);
+    return () => window.removeEventListener('TrackBack:open-support-chat', handler);
   }, []);
 
   // Initial load
@@ -169,11 +169,10 @@ export default function SupportChatWidget() {
     >
       {/* Panel */}
       <div
-        className={`mb-3 origin-bottom-right transition-all duration-300 ease-out ${
-          open
+        className={`mb-3 origin-bottom-right transition-all duration-300 ease-out ${open
             ? "opacity-100 scale-100 translate-y-0 pointer-events-auto"
             : "opacity-0 scale-95 translate-y-2 pointer-events-none"
-        }`}
+          }`}
         style={{
           width: "min(380px, calc(100vw - 32px))",
           height: "min(540px, calc(100vh - 120px))",
@@ -199,7 +198,7 @@ export default function SupportChatWidget() {
               </div>
               <div className="min-w-0">
                 <div className="text-[14px] font-semibold leading-tight truncate">
-                  ReturnFlow Support
+                  TrackBack Support
                 </div>
                 <div className="text-[11px] opacity-80 flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-green-300 inline-block animate-pulse" />
@@ -238,17 +237,16 @@ export default function SupportChatWidget() {
                   className={`flex ${fromMe ? "justify-end" : "justify-start"}`}
                 >
                   <div
-                    className={`max-w-[78%] rounded-2xl px-3.5 py-2 text-[13.5px] leading-relaxed ${
-                      fromMe
+                    className={`max-w-[78%] rounded-2xl px-3.5 py-2 text-[13.5px] leading-relaxed ${fromMe
                         ? "text-white rounded-br-md"
                         : "bg-white/[0.06] text-ink rounded-bl-md border border-divider"
-                    }`}
+                      }`}
                     style={
                       fromMe
                         ? {
-                            background:
-                              "linear-gradient(135deg,#6C63FF,#4F46E5)",
-                          }
+                          background:
+                            "linear-gradient(135deg,#6C63FF,#4F46E5)",
+                        }
                         : undefined
                     }
                   >

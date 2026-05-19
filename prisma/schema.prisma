@@ -64,7 +64,7 @@ model ShopSettings {
   labelBackToStore        String          @default("Back to store")
   labelCantFind           String          @default("Can't find your order?")
   labelStartAnother       String          @default("Start another return")
-  labelPoweredBy          String          @default("Secured by ReturnFlow")
+  labelPoweredBy          String          @default("Secured by TrackBack")
   labelTrackingToggle     String          @default("Already shipped your return? Submit tracking")
   liveChatEnabled         Boolean         @default(true)
   liveChatIcon            String          @default("MessageCircle")
