@@ -1280,3 +1280,5 @@ If your organization requires a data processing addendum, please review and agre
 Deja en analysant ça tu as vu la complexité enfin la concurrence est enorme du coup l'objectif n'est pas de fais un tuc aussi lourd mais qui ai les fonctionnalité de notre concurrent. Notre plus value le pricing moi je suis en afrique donc j'ai le pouvoir d'achat avec des prix a moins de 80$
 
 Donc quand pense tu? Comment on peut faire pour que notre app suive une logique claire en respectant et en mettant en implementation les fonctionnalité du concurrent. Surtout avec leur workflow je suppose que tu a deja une petite idée ou meme grande de leur logique et workflow et en regardant pour nous....
+
+ok
