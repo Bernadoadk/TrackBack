@@ -32,6 +32,16 @@ const shopify = shopifyApp({
         },
       ],
     },
+    "Starter Annual": {
+      replacementBehavior: BillingReplacementBehavior.ApplyImmediately,
+      lineItems: [
+        {
+          amount: 182.0,
+          currencyCode: "USD",
+          interval: BillingInterval.Annual,
+        },
+      ],
+    },
     "Pro": {
       replacementBehavior: BillingReplacementBehavior.ApplyImmediately,
       lineItems: [
@@ -39,6 +49,16 @@ const shopify = shopifyApp({
           amount: 49.0,
           currencyCode: "USD",
           interval: BillingInterval.Every30Days,
+        },
+      ],
+    },
+    "Pro Annual": {
+      replacementBehavior: BillingReplacementBehavior.ApplyImmediately,
+      lineItems: [
+        {
+          amount: 470.0,
+          currencyCode: "USD",
+          interval: BillingInterval.Annual,
         },
       ],
     },

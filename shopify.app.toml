@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "463f97a025f2b5e5044f69fa2ca6d93f"
-name = "ReturnFlow-dev"
+name = "TrackBack-dev"
 application_url = "https://therapeutic-meetings-penalty-possibility.trycloudflare.com"
 embedded = true
 

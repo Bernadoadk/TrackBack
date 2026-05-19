@@ -3,11 +3,25 @@ import prisma from "../db.server";
 export const PLAN_LIMITS: Record<string, number> = {
   free: 10,
   starter: 100,
+  starter_annual: 100,
   pro: 999999,
+  pro_annual: 999999,
 };
 
 // Ordered plan levels for comparison
-const PLAN_LEVEL: Record<string, number> = { free: 0, starter: 1, pro: 2 };
+const PLAN_LEVEL: Record<string, number> = {
+  free: 0,
+  starter: 1,
+  starter_annual: 1,
+  pro: 2,
+  pro_annual: 2,
+};
+
+// Normalize a Shopify subscription name ("Starter Annual") into a plan key
+// ("starter_annual"). Used everywhere we compare Shopify names to plan IDs.
+function normalizePlanName(name: string): string {
+  return String(name || '').toLowerCase().trim().replace(/\s+/g, '_');
+}
 
 /**
  * Billing mode — controls whether Shopify charges are real or test.
@@ -83,7 +97,7 @@ export async function syncBillingFromShopify(admin: any, shop: string): Promise<
     let best: { name: string; id: string; level: number } | null = null;
     for (const sub of subs) {
       if (sub.status !== 'ACTIVE') continue;
-      const planName = String(sub.name || '').toLowerCase();
+      const planName = normalizePlanName(sub.name);
       const level = PLAN_LEVEL[planName] ?? 0;
       if (level > 0 && (!best || level > best.level)) {
         best = { name: planName, id: sub.id, level };

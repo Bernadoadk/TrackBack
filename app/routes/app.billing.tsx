@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import { useLoaderData, useFetcher } from "react-router";
 import { authenticate } from "../shopify.server";
@@ -6,16 +6,21 @@ import prisma from "../db.server";
 import { PageHeader, Card, Btn, Icon, useToast } from "../components/ui";
 import { isBillingTestMode, syncBillingFromShopify } from "../lib/plan.server";
 
+// 20% discount on annual plans (2.4 months free)
+const ANNUAL_DISCOUNT_PCT = 20;
+
 const PLANS = [
   { id: 'free',    name: 'Free',    price: 0,  unit: 'forever', monthlyLimit: 10,
     summary: '10 returns / month',
     features: ['Customer return portal', 'Email notifications', 'Basic analytics', 'Up to 10 returns/month'],
   },
   { id: 'starter', name: 'Starter', price: 19, unit: 'month',   monthlyLimit: 100, popular: true,
+    annualId: 'starter_annual', annualName: 'Starter Annual', annualPrice: 182,
     summary: '100 returns / month',
     features: ['Everything in Free', 'Custom branding & logo', 'Advanced analytics', 'Email templates', 'Priority support'],
   },
   { id: 'pro',     name: 'Pro',     price: 49, unit: 'month',   monthlyLimit: 999999,
+    annualId: 'pro_annual', annualName: 'Pro Annual', annualPrice: 470,
     summary: 'Unlimited returns',
     features: ['Everything in Starter', 'Live chat with customers', 'API access & webhooks', 'Custom return reasons', 'White-label portal', 'Dedicated CSM'],
   },
@@ -46,10 +51,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     where: { shop, createdAt: { gte: firstDayOfMonth } }
   });
 
-  const currentPlan = PLANS.find(p => p.id === resolvedPlan) || PLANS[0];
+  // Match either monthly or annual variants back to their PLANS entry
+  const currentPlan =
+    PLANS.find(p => p.id === resolvedPlan) ||
+    PLANS.find(p => p.annualId === resolvedPlan) ||
+    PLANS[0];
+  const isAnnualActive = currentPlan.annualId === resolvedPlan;
   const limit = currentPlan.monthlyLimit;
 
-  return { usedThisMonth, limit, currentPlan, activated };
+  return { usedThisMonth, limit, currentPlan, activated, isAnnualActive };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -61,15 +71,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const testMode = isBillingTestMode();
 
   if (intent === "upgrade" && planId !== "free") {
-    const plan = PLANS.find((p) => p.id === planId);
-    if (!plan) return { error: "Plan not found" };
+    // Resolve plan + select the right Shopify plan name (monthly or annual)
+    const basePlan = PLANS.find((p) => p.id === planId || p.annualId === planId);
+    if (!basePlan) return { error: "Plan not found" };
+    const isAnnual = basePlan.annualId === planId;
+    const shopifyPlanName = isAnnual ? basePlan.annualName! : basePlan.name;
 
-    console.log(`[billing] upgrade → ${plan.name} | BILLING_MODE=${process.env.BILLING_MODE ?? "(unset)"} | isTest=${testMode}`);
+    console.log(`[billing] upgrade → ${shopifyPlanName} | BILLING_MODE=${process.env.BILLING_MODE ?? "(unset)"} | isTest=${testMode}`);
 
     // Already subscribed to this plan?
     try {
       const { hasActivePayment } = await shopifyBilling.check({
-        plans: [plan.name],
+        plans: [shopifyPlanName],
         isTest: testMode,
       });
       if (hasActivePayment) {
@@ -93,7 +106,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // cancels the approval page.
     try {
       const response = (await shopifyBilling.request({
-        plan: plan.name as any,
+        plan: shopifyPlanName as any,
         isTest: testMode,
         // returnUrl defaults to the appUrl; Shopify redirects back with ?charge_id=...
       })) as any;
@@ -121,7 +134,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (intent === "cancel") {
     try {
       // Look up the active subscription on Shopify side, then cancel it.
-      const allPaidPlans = PLANS.filter((p) => p.id !== "free").map((p) => p.name);
+      const allPaidPlans = PLANS
+        .filter((p) => p.id !== "free")
+        .flatMap((p) => (p.annualName ? [p.name, p.annualName] : [p.name]));
       const billingCheck = await shopifyBilling.check({
         plans: allPaidPlans as any,
         isTest: testMode,
@@ -172,9 +187,10 @@ async function extractConfirmationUrlAsync(response: Response): Promise<string |
 }
 
 export default function BillingPage() {
-  const { usedThisMonth, limit, currentPlan, activated } = useLoaderData<typeof loader>();
+  const { usedThisMonth, limit, currentPlan, activated, isAnnualActive } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const toast = useToast();
+  const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>(isAnnualActive ? 'annual' : 'monthly');
 
   // Show success toast when coming back from Shopify billing approval
   const shownActivated = useRef(false);
@@ -243,11 +259,16 @@ export default function BillingPage() {
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-[14px] font-semibold text-ink">
-                  You're on the <span className="text-warn">{currentPlan.name.toUpperCase()}</span> plan
+                  You're on the <span className="text-warn">{currentPlan.name.toUpperCase()}{isAnnualActive ? ' ANNUAL' : ''}</span> plan
                 </span>
                 <span className="text-[11px] px-2 py-0.5 rounded font-semibold" style={{ background: 'rgba(245,158,11,0.12)', color: '#F59E0B' }}>
                   {limit > 1000 ? 'Unlimited' : `${limit} returns/month`}
                 </span>
+                {isAnnualActive && (
+                  <span className="text-[11px] px-2 py-0.5 rounded font-semibold" style={{ background: 'rgba(34,197,94,0.12)', color: '#22C55E' }}>
+                    Annual · {ANNUAL_DISCOUNT_PCT}% off
+                  </span>
+                )}
               </div>
               <div className="text-[12.5px] text-muted mt-1">
                 {currentPlan.id === 'free' ? 'Upgrade to unlock branding, analytics and unlimited returns.' : `${currentPlan.summary} · Cancel anytime.`}
@@ -287,11 +308,45 @@ export default function BillingPage() {
         )}
       </div>
 
+      {/* Billing cycle toggle */}
+      <div className="flex justify-center mb-6">
+        <div className="inline-flex items-center gap-1 p-1 bg-bg border border-border rounded-full">
+          <button
+            type="button"
+            onClick={() => setBillingCycle('monthly')}
+            className={`px-4 h-8 rounded-full text-[12.5px] font-semibold transition-all ${
+              billingCycle === 'monthly' ? 'bg-surface text-ink shadow-sm' : 'text-muted hover:text-ink'
+            }`}
+          >
+            Monthly
+          </button>
+          <button
+            type="button"
+            onClick={() => setBillingCycle('annual')}
+            className={`px-4 h-8 rounded-full text-[12.5px] font-semibold transition-all flex items-center gap-1.5 ${
+              billingCycle === 'annual' ? 'bg-surface text-ink shadow-sm' : 'text-muted hover:text-ink'
+            }`}
+          >
+            Annual
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: 'rgba(34,197,94,0.18)', color: '#22C55E' }}>
+              -{ANNUAL_DISCOUNT_PCT}%
+            </span>
+          </button>
+        </div>
+      </div>
+
       {/* Plans */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
         {PLANS.map(p => {
           const isPop = p.popular;
-          const isCurrent = currentPlan.id === p.id;
+          const showAnnual = billingCycle === 'annual' && !!p.annualId;
+          const displayPrice = showAnnual ? Math.round((p.annualPrice! / 12) * 100) / 100 : p.price;
+          const displayUnit = p.id === 'free' ? 'forever' : 'mo';
+          const targetId = showAnnual ? p.annualId! : p.id;
+          const targetName = showAnnual ? p.annualName! : p.name;
+          const isCurrent = (currentPlan.id === p.id && !isAnnualActive && !showAnnual) ||
+                            (currentPlan.id === p.id && isAnnualActive && showAnnual);
+          const monthlyEquivalent = showAnnual ? p.price : null;
           return (
             <div key={p.id}
                  className={`relative bg-surface border rounded-xl p-6 flex flex-col transition-all ${
@@ -303,11 +358,27 @@ export default function BillingPage() {
                   ⭐ MOST POPULAR
                 </div>
               )}
-              <div className="text-[12px] font-semibold uppercase tracking-wider" style={{ color: isPop ? '#8B85FF' : '#8B8FA8' }}>{p.name}</div>
-              <div className="mt-2 flex items-baseline gap-1">
-                <span className="text-[36px] font-bold text-ink tracking-tight tabular-nums">${p.price}</span>
-                <span className="text-[13px] text-muted">/{p.unit === 'month' ? 'mo' : p.unit}</span>
+              <div className="flex items-center justify-between">
+                <div className="text-[12px] font-semibold uppercase tracking-wider" style={{ color: isPop ? '#8B85FF' : '#8B8FA8' }}>{p.name}</div>
+                {showAnnual && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: 'rgba(34,197,94,0.15)', color: '#22C55E' }}>
+                    SAVE {ANNUAL_DISCOUNT_PCT}%
+                  </span>
+                )}
               </div>
+              <div className="mt-2 flex items-baseline gap-1">
+                <span className="text-[36px] font-bold text-ink tracking-tight tabular-nums">${displayPrice}</span>
+                <span className="text-[13px] text-muted">/{displayUnit}</span>
+              </div>
+              {showAnnual ? (
+                <div className="text-[12px] text-muted mt-0.5">
+                  <span className="line-through">${monthlyEquivalent}/mo</span>
+                  {' · '}
+                  <span className="text-ink">${p.annualPrice} billed yearly</span>
+                </div>
+              ) : (
+                <div className="text-[12px] text-transparent mt-0.5 select-none">.</div>
+              )}
               <div className="text-[13px] text-ink mt-1">{p.summary}</div>
 
               <div className="mt-5 pt-5 border-t border-divider space-y-2.5 flex-1">
@@ -326,13 +397,13 @@ export default function BillingPage() {
                   </button>
                 ) : isPop ? (
                   <Btn variant="primary" className="w-full" size="lg" disabled={isSaving}
-                       onClick={() => handleUpgrade(p.id)}>
-                    {isSaving ? 'Redirecting...' : `Upgrade to ${p.name}`}
+                       onClick={() => handleUpgrade(targetId)}>
+                    {isSaving ? 'Redirecting...' : `Upgrade to ${targetName}`}
                   </Btn>
                 ) : (
                   <Btn variant="secondary" className="w-full" size="lg" disabled={isSaving}
-                       onClick={() => handleUpgrade(p.id)}>
-                    {isSaving ? 'Redirecting...' : `Upgrade to ${p.name}`}
+                       onClick={() => handleUpgrade(targetId)}>
+                    {isSaving ? 'Redirecting...' : `Upgrade to ${targetName}`}
                   </Btn>
                 )}
               </div>
