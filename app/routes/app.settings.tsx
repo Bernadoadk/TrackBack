@@ -107,8 +107,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function SettingsPage() {
   const { settings, templates, shop, appUrl, plan } = useLoaderData<typeof loader>();
-  const location = useLocation();
-  const billingHref = `/app/billing${location.search}`;
 
   const tabs = [
     { key: 'General', icon: 'Settings2' },
@@ -365,6 +363,8 @@ function ReasonsTab({ settings, plan }: any) {
   const submit = useSubmit();
   const navigation = useNavigation();
   const toast = useToast();
+  const location = useLocation();
+  const billingHref = `/app/billing${location.search}`;
   const isSaving = navigation.state === "submitting" && navigation.formData?.get("intent") === "save_reasons";
   const actionData = useActionData<typeof action>();
 
