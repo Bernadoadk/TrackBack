@@ -3,7 +3,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import { useLoaderData, useFetcher, useNavigate, redirect } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { Icon, Btn, Input, Textarea, useToast } from "../components/ui";
+import { Icon, Btn, Input, Textarea, Modal, useToast } from "../components/ui";
 import { ensureShopSettings, evaluateOnboarding } from "../lib/onboarding.server";
 import { CRITICAL_FIELDS, fieldIsCustomized } from "../lib/onboarding";
 
@@ -109,6 +109,7 @@ export default function OnboardingPage() {
   const [returnAddress, setReturnAddress] = useState(initial.returnAddress);
   const [returnWindow, setReturnWindow] = useState<number>(initial.returnWindow);
   const [returnPolicy, setReturnPolicy] = useState(initial.returnPolicy);
+  const [skipConfirmOpen, setSkipConfirmOpen] = useState(false);
 
   const step = STEPS[stepIdx];
 
@@ -137,8 +138,10 @@ export default function OnboardingPage() {
     }, { method: 'POST' });
   };
 
-  const handleSkip = () => {
-    if (!confirm('Skip setup for now? Returns and refunds may not work correctly until you complete the critical fields.')) return;
+  const handleSkip = () => setSkipConfirmOpen(true);
+
+  const confirmSkip = () => {
+    setSkipConfirmOpen(false);
     fetcher.submit({ intent: 'skip' }, { method: 'POST' });
   };
 
@@ -327,6 +330,30 @@ export default function OnboardingPage() {
           )}
         </div>
       </main>
+
+      {/* Skip-confirmation modal */}
+      <Modal
+        open={skipConfirmOpen}
+        onClose={() => setSkipConfirmOpen(false)}
+        title="Skip setup for now?"
+        footer={<>
+          <Btn variant="ghost" onClick={() => setSkipConfirmOpen(false)}>Keep setting up</Btn>
+          <Btn variant="danger-outline" icon="LogOut" onClick={confirmSkip} disabled={submitting}>
+            Yes, skip for now
+          </Btn>
+        </>}
+      >
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-warn/15 text-warn grid place-content-center shrink-0">
+            <Icon name="TriangleAlert" size={18} />
+          </div>
+          <div className="text-[13.5px] text-ink leading-relaxed">
+            Returns and refunds may not work correctly until you complete the critical fields.
+            You can finish setup later from <span className="font-semibold">Settings</span>, but customers
+            won't be able to start a return until then.
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
