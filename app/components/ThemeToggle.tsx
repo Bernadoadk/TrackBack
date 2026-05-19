@@ -4,9 +4,9 @@ import { Icon } from "./ui";
 type Theme = "light" | "dark";
 
 function readTheme(): Theme {
-  if (typeof document === "undefined") return "dark";
+  if (typeof document === "undefined") return "light";
   const t = document.documentElement.getAttribute("data-theme");
-  return t === "light" ? "light" : "dark";
+  return t === "dark" ? "dark" : "light";
 }
 
 function applyTheme(t: Theme) {
@@ -16,7 +16,7 @@ function applyTheme(t: Theme) {
 
 export default function ThemeToggle() {
   const [mounted, setMounted] = useState(false);
-  const [theme, setTheme] = useState<Theme>("dark");
+  const [theme, setTheme] = useState<Theme>("light");
 
   useEffect(() => {
     setTheme(readTheme());

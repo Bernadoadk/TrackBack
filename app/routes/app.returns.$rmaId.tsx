@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useLocation, useLoaderData, useFetcher } from "react-router";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
@@ -176,7 +176,27 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       return txs.find((t: any) => (t.kind === 'SALE' || t.kind === 'CAPTURE') && t.status === 'SUCCESS') || null;
     }
 
-    function mapRefundLineItems(order: any) {
+    // Shopify requires a locationId on each refund line item when restockType=RETURN.
+    // Fetch the first active location; if none is available we fall back to NO_RESTOCK
+    // so the refund still succeeds (the merchant can restock manually in Shopify).
+    async function fetchRestockLocationId(): Promise<string | null> {
+      try {
+        const res = await admin.graphql(`#graphql
+          query RestockLocation {
+            locations(first: 10) {
+              edges { node { id isActive } }
+            }
+          }`);
+        const data = await res.json();
+        const edges: any[] = data?.data?.locations?.edges ?? [];
+        const active = edges.find((e: any) => e.node?.isActive);
+        return active?.node?.id ?? edges[0]?.node?.id ?? null;
+      } catch {
+        return null;
+      }
+    }
+
+    function mapRefundLineItems(order: any, locationId: string | null) {
       const shopifyLineItems: any[] = order?.lineItems?.edges?.map((e: any) => e.node) || [];
       return rr!.items
         .map((it: any) => {
@@ -184,7 +204,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             ? shopifyLineItems.find((li: any) => li.id === it.lineItemId)
             : shopifyLineItems.find((li: any) => li.variant?.id === it.variantId);
           if (!shopifyItem) return null;
-          return { lineItemId: shopifyItem.id, quantity: it.quantity, restockType: "RETURN" };
+          return locationId
+            ? { lineItemId: shopifyItem.id, quantity: it.quantity, restockType: "RETURN", locationId }
+            : { lineItemId: shopifyItem.id, quantity: it.quantity, restockType: "NO_RESTOCK" };
         })
         .filter(Boolean);
     }
@@ -203,7 +225,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         if (!order) return { error: "Order not found in Shopify. Please verify the order ID." };
 
         const saleTx = pickSaleTransaction(order);
-        const refundLineItems = mapRefundLineItems(order);
+        const locationId = await fetchRestockLocationId();
+        const refundLineItems = mapRefundLineItems(order, locationId);
         customerId = order.customer?.id ?? null;
 
         if (!saleTx) return { error: "No successful payment transaction found on this order. The refund cannot be processed automatically." };
@@ -282,7 +305,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
         // 2) Notional refund (no money movement) so Shopify restocks items + marks
         //    the order as refunded. Empty transactions = "refund without payment".
-        const refundLineItems = mapRefundLineItems(order);
+        const locationId = await fetchRestockLocationId();
+        const refundLineItems = mapRefundLineItems(order, locationId);
         if (refundLineItems.length > 0) {
           const refundRes = await admin.graphql(`#graphql
             mutation RefundCreate($input: RefundInput!) {
@@ -425,7 +449,14 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }
   }
 
-  return { success: true };
+  // Echo the intent (and status when relevant) so the client can dismiss the
+  // right modal/toast: React Router v7 clears fetcher.formData on idle, so we
+  // can't reliably check the submitted intent from the client side anymore.
+  return {
+    success: true,
+    intent: typeof intent === 'string' ? intent : null,
+    status: (formData.get('status') as string | null) ?? null,
+  };
 };
 
 export default function ReturnDetailPage() {
@@ -454,37 +485,43 @@ export default function ReturnDetailPage() {
   const [shipCarrier, setShipCarrier] = useState('');
   const [shipTracking, setShipTracking] = useState('');
 
+  // Tracks which fetcher response we've already handled (so the same data
+  // payload doesn't trigger duplicate toasts on re-render).
+  const handledFetcherRef = useRef<any>(null);
   useEffect(() => {
-    if (fetcher.data && fetcher.state === 'idle') {
-      const data = fetcher.data as any;
-      const fd = fetcher.formData as FormData | undefined;
-      if (data.success && fd?.get("intent") === "add_note") {
-        setInternalNote('');
-        toast({ kind: 'info', title: 'Note added' });
-      } else if (data.success && fd?.get("intent") === "update_status") {
-        const status = fd?.get("status");
-        if (status === 'APPROVED') {
-          setApproveOpen(false);
-          toast({ kind: 'success', title: 'Return approved', body: `${r.rma} — shipping instructions sent.` });
-        } else if (status === 'REJECTED') {
-          setRejectOpen(false);
-          setRejectReason('');
-          toast({ kind: 'error', title: 'Return rejected', body: 'Customer has been notified.' });
-        } else if (status === 'SHIPPED') {
-          setShipOpen(false);
-          toast({ kind: 'success', title: 'Marked as shipped', body: 'Waiting for arrival at warehouse.' });
-        } else if (status === 'RECEIVED') {
-          toast({ kind: 'success', title: 'Marked as received', body: 'Refund queue updated.' });
-        }
-      } else if (data.success && fd?.get("intent") === "process_refund") {
-        setRefundOpen(false);
-        const methodLabel = REFUND_TYPES[refundMethod as string]?.label || 'Refund';
-        toast({ kind: 'success', title: 'Refund issued', body: `${methodLabel} — $${parseFloat(refundAmountStr || '0').toFixed(2)} to ${r.customerName}.` });
-      } else if (data.error) {
-        toast({ kind: 'error', title: 'Error', body: (fetcher.data as any).error });
+    if (fetcher.state !== 'idle' || !fetcher.data) return;
+    if (handledFetcherRef.current === fetcher.data) return;
+    handledFetcherRef.current = fetcher.data;
+
+    const data = fetcher.data as any;
+    const dataIntent = data?.intent as string | undefined;
+    const dataStatus = data?.status as string | undefined;
+
+    if (data.success && dataIntent === "add_note") {
+      setInternalNote('');
+      toast({ kind: 'info', title: 'Note added' });
+    } else if (data.success && dataIntent === "update_status") {
+      if (dataStatus === 'APPROVED') {
+        setApproveOpen(false);
+        toast({ kind: 'success', title: 'Return approved', body: `${r.rma} — shipping instructions sent.` });
+      } else if (dataStatus === 'REJECTED') {
+        setRejectOpen(false);
+        setRejectReason('');
+        toast({ kind: 'error', title: 'Return rejected', body: 'Customer has been notified.' });
+      } else if (dataStatus === 'SHIPPED') {
+        setShipOpen(false);
+        toast({ kind: 'success', title: 'Marked as shipped', body: 'Waiting for arrival at warehouse.' });
+      } else if (dataStatus === 'RECEIVED') {
+        toast({ kind: 'success', title: 'Marked as received', body: 'Refund queue updated.' });
       }
+    } else if (data.success && dataIntent === "process_refund") {
+      setRefundOpen(false);
+      const methodLabel = REFUND_TYPES[refundMethod as string]?.label || 'Refund';
+      toast({ kind: 'success', title: 'Refund issued', body: `${methodLabel} — $${parseFloat(refundAmountStr || '0').toFixed(2)} to ${r.customerName}.` });
+    } else if (data.error) {
+      toast({ kind: 'error', title: 'Error', body: data.error });
     }
-  }, [fetcher.data, fetcher.state, fetcher.formData, r.rma, r.customerName, refundMethod, refundAmountStr, toast]);
+  }, [fetcher.data, fetcher.state, r.rma, r.customerName, refundMethod, refundAmountStr, toast]);
 
   const itemsTotal = r.items.reduce((s: number, it: any) => s + it.price * it.quantity, 0);
   const restocking = 0;
@@ -598,19 +635,12 @@ export default function ReturnDetailPage() {
         <Icon name="ArrowLeft" size={14} className="group-hover:-translate-x-0.5 transition-transform" /> Returns
       </Link>
 
-      <div className="flex items-start justify-between gap-4 flex-wrap mb-6">
-        <div>
-          <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-[22px] font-semibold text-ink tracking-tight font-mono">{r.rma}</h1>
-            <StatusBadge status={r.status} size="lg" />
-          </div>
-          <div className="text-[13px] text-muted mt-1.5">Submitted {new Date(r.createdAt).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</div>
+      <div className="mb-6">
+        <div className="flex items-center gap-3 flex-wrap">
+          <h1 className="text-[22px] font-semibold text-ink tracking-tight font-mono">{r.rma}</h1>
+          <StatusBadge status={r.status} size="lg" />
         </div>
-        <div className="flex items-center gap-2">
-          <a href={`mailto:${r.customerEmail}?subject=Your return ${r.rma} — ${r.orderName}`}>
-            <Btn variant="secondary" icon="MessageCircle" size="sm">Message customer</Btn>
-          </a>
-        </div>
+        <div className="text-[13px] text-muted mt-1.5">Submitted {new Date(r.createdAt).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
