@@ -66,8 +66,12 @@ export function evaluateOnboarding(settings: any): OnboardingState {
     .filter((f) => !fieldIsCustomized(f.key, settings[f.key]))
     .map((f) => f.key);
 
-  if (settings.onboardingCompletedAt && missingFields.length === 0) {
-    return { status: 'complete', missingFields: [], settings };
+  // Once the merchant has explicitly completed the onboarding action (which
+  // validates every field server-side before stamping the timestamp), trust
+  // it — even if a value happens to match a DB default marker (e.g. the
+  // policy template). Otherwise users get bounced back into the wizard.
+  if (settings.onboardingCompletedAt) {
+    return { status: 'complete', missingFields, settings };
   }
   if (settings.onboardingSkippedAt) {
     return { status: 'skipped', missingFields, settings };

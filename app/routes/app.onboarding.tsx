@@ -14,7 +14,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const state = evaluateOnboarding(settings);
   if (state.status === 'complete') {
-    throw redirect('/app');
+    const url = new URL(request.url);
+    throw redirect(`/app?${url.searchParams.toString()}`);
   }
 
   return {
@@ -35,12 +36,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
   const intent = formData.get("intent");
 
+  const url = new URL(request.url);
+  const qs = url.searchParams.toString();
+
   if (intent === "skip") {
     await prisma.shopSettings.update({
       where: { shop },
       data: { onboardingSkippedAt: new Date() }
     });
-    return redirect('/app');
+    return { ok: true, redirectTo: qs ? `/app?${qs}` : '/app' };
   }
 
   if (intent === "complete") {
@@ -67,7 +71,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         onboardingSkippedAt: null,
       }
     });
-    return redirect('/app?onboarded=1');
+    const extra = qs ? `&${qs}` : '';
+    return { ok: true, redirectTo: `/app?onboarded=1${extra}` };
   }
 
   return null;
@@ -106,7 +111,6 @@ export default function OnboardingPage() {
   const [returnPolicy, setReturnPolicy] = useState(initial.returnPolicy);
 
   const step = STEPS[stepIdx];
-  const progress = (stepIdx / (STEPS.length - 1)) * 100;
 
   // Per-step validation
   const stepValid = useMemo(() => {
@@ -141,38 +145,63 @@ export default function OnboardingPage() {
   useEffect(() => {
     const data = fetcher.data as any;
     if (data?.error) toast?.({ kind: 'error', title: 'Error', body: data.error });
-  }, [fetcher.data, toast]);
+    if (data?.ok && data?.redirectTo) navigate(data.redirectTo, { replace: true });
+  }, [fetcher.data, toast, navigate]);
 
   return (
-    <div className="-m-6 md:-m-10 min-h-[calc(100vh-2rem)] flex flex-col">
-      {/* Top progress + skip */}
-      <header className="px-6 md:px-10 pt-6 pb-4 flex items-center justify-between gap-4 sticky top-0 z-10 bg-bg/80 backdrop-blur-md border-b border-divider">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg grid place-content-center text-white shadow-[0_4px_14px_-2px_rgba(108,99,255,0.5)]"
-               style={{ background: 'linear-gradient(135deg,#6C63FF,#8B5CF6)' }}>
-            <Icon name="RefreshCcw" size={16} strokeWidth={2.5} />
-          </div>
-          <div>
-            <div className="text-[14.5px] font-semibold tracking-tight">ReturnFlow setup</div>
-            <div className="text-[11.5px] text-muted">Step {stepIdx + 1} of {STEPS.length} · {step.title}</div>
-          </div>
-        </div>
-        {step.id !== 'done' && (
-          <button onClick={handleSkip} disabled={submitting}
-                  className="text-[12.5px] text-muted hover:text-ink transition px-3 py-1.5 rounded-md hover:bg-white/[0.04]">
-            Skip for now
-          </button>
-        )}
-      </header>
+    <div className="-m-6 md:-m-10 min-h-[calc(100vh-2rem)] flex flex-col relative">
+      {/* Skip — discreet, floats top-right, intentionally outside the stepper */}
+      {step.id !== 'done' && (
+        <button
+          onClick={handleSkip}
+          disabled={submitting}
+          className="absolute top-5 right-5 md:top-6 md:right-8 z-10 text-[12.5px] text-muted hover:text-ink transition px-3 py-1.5 rounded-md hover:bg-elevated"
+        >
+          Skip for now
+        </button>
+      )}
 
-      {/* Slim progress bar */}
-      <div className="h-1 bg-divider relative overflow-hidden">
-        <div className="h-full transition-all duration-500 ease-out"
-             style={{ width: `${progress}%`, background: 'linear-gradient(90deg,#6C63FF,#8B5CF6)' }} />
+      {/* Stepper — bare row of dots, no card, no border */}
+      <div className="px-6 md:px-10 pt-10 pb-2 flex justify-center">
+        <ol className="flex items-center w-full max-w-md">
+          {STEPS.map((s, idx) => {
+            const reached = idx <= stepIdx;
+            const isCurrent = idx === stepIdx;
+            return (
+              <li key={s.id} className="flex items-center flex-1 last:flex-none">
+                <div
+                  className={`shrink-0 w-7 h-7 rounded-full grid place-content-center text-[11.5px] font-semibold transition ${
+                    reached
+                      ? 'text-white shadow-[0_2px_8px_rgba(108,99,255,0.4)]'
+                      : 'text-muted border border-divider bg-surface'
+                  } ${isCurrent ? 'ring-2 ring-accent2/40 ring-offset-2 ring-offset-bg' : ''}`}
+                  style={reached ? { background: 'linear-gradient(135deg,#6C63FF,#8B5CF6)' } : undefined}
+                  aria-current={isCurrent ? 'step' : undefined}
+                  title={s.title}
+                >
+                  {idx + 1}
+                </div>
+                {idx < STEPS.length - 1 && (
+                  <div
+                    className="h-px flex-1 mx-2 transition-all"
+                    style={{
+                      background:
+                        idx < stepIdx
+                          ? 'linear-gradient(90deg,#6C63FF,#8B5CF6)'
+                          : undefined,
+                    }}
+                  >
+                    {idx >= stepIdx && <div className="h-full bg-divider" />}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ol>
       </div>
 
       {/* Step content — centered card */}
-      <main className="flex-1 flex items-start md:items-center justify-center px-6 md:px-10 py-10">
+      <main className="flex-1 flex items-start md:items-center justify-center px-6 md:px-10 pt-6 pb-10">
         <div className="w-full max-w-xl">
 
           {step.id === 'welcome' && (
@@ -232,7 +261,7 @@ export default function OnboardingPage() {
                     className={`py-2.5 rounded-lg text-[13px] font-semibold transition border ${
                       returnWindow === d
                         ? 'bg-accent2/20 text-accent2 border-accent2/40'
-                        : 'bg-white/[0.02] text-muted border-divider hover:text-ink hover:border-divider/80'
+                        : 'bg-elevated text-muted border-divider hover:text-ink hover:border-border'
                     }`}>
                     {d} days
                   </button>
@@ -338,7 +367,7 @@ function WelcomeStep({ onStart, alreadySkipped }: any) {
 
 function Feature({ icon, title, sub }: any) {
   return (
-    <div className="flex items-start gap-2.5 px-3.5 py-3 rounded-lg bg-white/[0.02] border border-divider">
+    <div className="flex items-start gap-2.5 px-3.5 py-3 rounded-lg bg-elevated border border-divider">
       <div className="w-7 h-7 rounded-md bg-accent/15 text-accent2 grid place-content-center shrink-0">
         <Icon name={icon} size={14} />
       </div>

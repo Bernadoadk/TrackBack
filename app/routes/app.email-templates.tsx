@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
-import { useLoaderData, useSubmit, useNavigation, useActionData } from "react-router";
+import { useLoaderData, useSubmit, useNavigation, useActionData, Link, useLocation } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getShopPlan, planAtLeast, syncBillingFromShopify } from "../lib/plan.server";
@@ -157,6 +157,8 @@ export default function EmailTemplatesPage() {
   const navigation = useNavigation();
   const actionData = useActionData<typeof action>();
   const toast      = useToast();
+  const location   = useLocation();
+  const billingHref = `/app/billing${location.search}`;
 
   const [logoUrl,    setLogoUrl]    = useState(initLogo);
   const [brandColor, setBrandColor] = useState(initColor);
@@ -222,11 +224,11 @@ export default function EmailTemplatesPage() {
             <span className="font-semibold">Email Templates require the Starter plan.</span>
             {" "}Upgrade to customize email content and branding.
           </p>
-          <a href="/app/billing"
+          <Link to={billingHref}
             className="shrink-0 h-7 px-3 rounded-md text-[12px] font-semibold text-white flex items-center gap-1"
             style={{ background: '#F59E0B' }}>
             Upgrade <Icon name="ArrowRight" size={12} />
-          </a>
+          </Link>
         </div>
       )}
 

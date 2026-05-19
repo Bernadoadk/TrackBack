@@ -2,7 +2,7 @@
 
 client_id = "463f97a025f2b5e5044f69fa2ca6d93f"
 name = "ReturnFlow-dev"
-application_url = "https://0291-137-255-160-251.ngrok-free.app"
+application_url = "https://therapeutic-meetings-penalty-possibility.trycloudflare.com"
 embedded = true
 
 [build]
@@ -12,51 +12,44 @@ automatically_update_urls_on_dev = true
 api_version = "2026-07"
 
   [[webhooks.subscriptions]]
-  topics = [ "app/scopes_update" ]
-  uri = "/webhooks/app/scopes_update"
+  topics = [ "shop/update" ]
+  uri = "/webhooks/shop/update"
 
   [[webhooks.subscriptions]]
   topics = [ "app/uninstalled" ]
   uri = "/webhooks/app/uninstalled"
 
-  # ── Mandatory GDPR compliance webhooks ─────────────────────────────────
-  [webhooks.privacy_compliance]
-  customer_data_request_url = "/webhooks/customers/data_request"
-  customer_deletion_url     = "/webhooks/customers/redact"
-  shop_deletion_url         = "/webhooks/shop/redact"
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/customers/data_request"
+  compliance_topics = [ "customers/data_request" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/customers/redact"
+  compliance_topics = [ "customers/redact" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/shop/redact"
+  compliance_topics = [ "shop/redact" ]
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_customers,read_orders,read_products,write_gift_cards,write_orders,write_products,read_returns,write_returns,read_store_credit_accounts,read_store_credit_account_transactions,write_store_credit_account_transactions,write_draft_orders,read_draft_orders"
+scopes = "read_customers,read_draft_orders,read_orders,read_products,read_returns,read_store_credit_account_transactions,read_store_credit_accounts,write_draft_orders,write_gift_cards,write_orders,write_products,write_returns,write_store_credit_account_transactions"
 
 [auth]
-redirect_urls = [ "https://0291-137-255-160-251.ngrok-free.app/api/auth" ]
+redirect_urls = [
+  "https://therapeutic-meetings-penalty-possibility.trycloudflare.com/auth/callback",
+  "https://therapeutic-meetings-penalty-possibility.trycloudflare.com/auth/shopify/callback",
+  "https://therapeutic-meetings-penalty-possibility.trycloudflare.com/api/auth/callback"
+]
 
 [app_proxy]
-url = "https://0291-137-255-160-251.ngrok-free.app/portal"
+url = "https://therapeutic-meetings-penalty-possibility.trycloudflare.com/proxy"
 subpath = "returns"
 prefix = "apps"
 
-[product.metafields.app.demo_info]
-type = "single_line_text_field"
-name = "Demo Source Info"
-description = "Tracks products created by the Shopify app template for development"
-
-  [product.metafields.app.demo_info.access]
-  admin = "merchant_read_write"
-
-[metaobjects.app.example]
-name = "Example"
-description = "An example metaobject definition created by this template"
-
-  [metaobjects.app.example.access]
-  admin = "merchant_read_write"
-
-[metaobjects.app.example.fields.title]
-name = "Title"
-type = "single_line_text_field"
-required = true
-
-[metaobjects.app.example.fields.description]
-name = "Description"
-type = "multi_line_text_field"
+[pos]
+embedded = false

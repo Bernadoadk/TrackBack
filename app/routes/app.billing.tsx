@@ -352,7 +352,14 @@ export default function BillingPage() {
           <div className="text-[13.5px] font-semibold text-ink">Questions about pricing?</div>
           <div className="text-[12.5px] text-muted mt-0.5">Chat with our team — we usually reply within an hour.</div>
         </div>
-        <Btn variant="secondary" size="sm" icon="MessageCircle">Contact us</Btn>
+        <Btn
+          variant="secondary"
+          size="sm"
+          icon="MessageCircleMore"
+          onClick={() => window.dispatchEvent(new Event('returnflow:open-support-chat'))}
+        >
+          Contact us
+        </Btn>
       </div>
     </div>
   );

@@ -27,140 +27,110 @@ model Session {
   refreshTokenExpires DateTime?
 }
 
-// Paramètres de l'application (un par shop)
 model ShopSettings {
-  id                      String   @id @default(cuid())
-  shop                    String   @unique
-  returnWindow            Int      @default(30)
-  returnAddress           String   @default("Acme Store — Returns\n1450 Mission St, Suite 200\nSan Francisco, CA 94103\nUnited States")
-  autoApprove             Boolean  @default(false)
-  autoExpireDays          Int      @default(7)
-  blockedSkus             String   @default("")
-  notifyMerchant          Boolean  @default(true)
-  fromEmail               String   @default("returns@acmestore.com")
-  allowStoreCredit        Boolean  @default(true)
-  allowExchanges          Boolean  @default(false)
-  storeCreditBonusPercent Int      @default(10)
-  incentivizeStoreCredit  Boolean  @default(false)
-  brandColor              String   @default("#6C63FF")
-  emailBrandColor         String   @default("#6C63FF")
+  id                      String          @id @default(cuid())
+  shop                    String          @unique
+  returnWindow            Int             @default(30)
+  returnAddress           String          @default("Acme Store — Returns\n1450 Mission St, Suite 200\nSan Francisco, CA 94103\nUnited States")
+  autoApprove             Boolean         @default(false)
+  autoExpireDays          Int             @default(7)
+  blockedSkus             String          @default("")
+  notifyMerchant          Boolean         @default(true)
+  fromEmail               String          @default("returns@acmestore.com")
+  allowStoreCredit        Boolean         @default(true)
+  allowExchanges          Boolean         @default(false)
+  storeCreditBonusPercent Int             @default(10)
+  incentivizeStoreCredit  Boolean         @default(false)
+  brandColor              String          @default("#6C63FF")
+  emailBrandColor         String          @default("#6C63FF")
   logoUrl                 String?
-  returnPolicy            String   @default("We want you to love what you buy. If something isn't quite right, here's how it works:\n\n· Returns are accepted within 30 days of delivery.\n· Items must be unworn, unwashed, and in original packaging.\n· Final-sale items (marked at checkout) cannot be returned.\n· Refunds are issued to the original payment method within 3–5 business days of receiving the returned item.\n\nTo start a return, head to our return portal with your order number and email. We'll email a prepaid label and you can drop it off at any location.\n\nQuestions? Email us — we usually reply within 1 business day.")
-
-  // Portal editor fields
-  portalLayout            String   @default("classic")
-  bannerColor             String   @default("#ffffff")
-  portalStoreName         String   @default("")
-  footerContact           String   @default("")
-  // Step labels (titles)
-  labelFindOrder          String   @default("Find your order")
-  labelSelectItems        String   @default("Select items to return")
-  labelReasons            String   @default("Tell us why")
-  labelRefundType         String   @default("How would you like to be refunded?")
-  labelConfirm            String   @default("Review & submit")
-  labelCta                String   @default("Find Order")
-  labelSubmit             String   @default("Submit Return Request")
-  // Step descriptions (subtitles)
-  descFindOrder           String   @default("Enter your order number and the email used at checkout.")
-  descSelectItems         String   @default("Select the items you'd like to return.")
-  descReasons             String   @default("Help us understand why you're returning each item.")
-  descRefundType          String   @default("Choose the option that works best for you.")
-  descConfirm             String   @default("One last look before we send this.")
-  // General UI texts
-  labelBackToStore        String   @default("Back to store")
-  labelCantFind           String   @default("Can't find your order?")
-  labelStartAnother       String   @default("Start another return")
-  labelPoweredBy          String   @default("Secured by ReturnFlow")
-  labelTrackingToggle     String   @default("Already shipped your return? Submit tracking")
-
-  // Live chat
-  liveChatEnabled         Boolean  @default(true)
-  liveChatIcon            String   @default("MessageCircle")
-
-  // Onboarding state
+  returnPolicy            String          @default("We want you to love what you buy. If something isn't quite right, here's how it works:\n\n· Returns are accepted within 30 days of delivery.\n· Items must be unworn, unwashed, and in original packaging.\n· Final-sale items (marked at checkout) cannot be returned.\n· Refunds are issued to the original payment method within 3–5 business days of receiving the returned item.\n\nTo start a return, head to our return portal with your order number and email. We'll email a prepaid label and you can drop it off at any location.\n\nQuestions? Email us — we usually reply within 1 business day.")
+  portalLayout            String          @default("classic")
+  bannerColor             String          @default("#ffffff")
+  portalStoreName         String          @default("")
+  footerContact           String          @default("")
+  labelFindOrder          String          @default("Find your order")
+  labelSelectItems        String          @default("Select items to return")
+  labelReasons            String          @default("Tell us why")
+  labelRefundType         String          @default("How would you like to be refunded?")
+  labelConfirm            String          @default("Review & submit")
+  labelCta                String          @default("Find Order")
+  labelSubmit             String          @default("Submit Return Request")
+  descFindOrder           String          @default("Enter your order number and the email used at checkout.")
+  descSelectItems         String          @default("Select the items you'd like to return.")
+  descReasons             String          @default("Help us understand why you're returning each item.")
+  descRefundType          String          @default("Choose the option that works best for you.")
+  descConfirm             String          @default("One last look before we send this.")
+  labelBackToStore        String          @default("Back to store")
+  labelCantFind           String          @default("Can't find your order?")
+  labelStartAnother       String          @default("Start another return")
+  labelPoweredBy          String          @default("Secured by ReturnFlow")
+  labelTrackingToggle     String          @default("Already shipped your return? Submit tracking")
+  liveChatEnabled         Boolean         @default(true)
+  liveChatIcon            String          @default("MessageCircle")
   onboardingCompletedAt   DateTime?
   onboardingSkippedAt     DateTime?
-
-  // Custom reasons
+  createdAt               DateTime        @default(now())
+  updatedAt               DateTime        @updatedAt
   reasons                 ReturnReason[]
-  // Demandes de retour
   returnRequests          ReturnRequest[]
-  
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
 }
 
-// Raisons de retour disponibles pour un shop
 model ReturnReason {
-  id          String       @id @default(cuid())
-  shop        String
-  label       String
-  enabled     Boolean      @default(true)
-  
-  settings    ShopSettings @relation(fields: [shop], references: [shop], onDelete: Cascade)
+  id       String       @id @default(cuid())
+  shop     String
+  label    String
+  enabled  Boolean      @default(true)
+  settings ShopSettings @relation(fields: [shop], references: [shop], onDelete: Cascade)
 }
 
-// Une demande de retour faite par un client
 model ReturnRequest {
-  id              String         @id @default(cuid())
-  rma             String         @unique // e.g. RMA-2026-000012
-  shop            String
-  orderId         String         // Shopify Order ID
-  orderName       String         // e.g. #1089
-  customerEmail   String
-  customerName    String
-  customerPhone   String?
-  orderDate       DateTime
-  fulfilledDate   DateTime?
-  orderTotal      Float
-  
-  // PENDING, APPROVED, SHIPPED, RECEIVED, REFUNDED, REJECTED, EXPIRED
-  status          String         @default("PENDING")
-
-  // ORIGINAL_PAYMENT, STORE_CREDIT, EXCHANGE
-  refundType      String         @default("ORIGINAL_PAYMENT")
-  refundAmount    Float          @default(0)
-  storeCreditBonus Float         @default(0)
-
-  rejectionReason   String?
-  exchangeNote      String?   // Desired exchange item/size (when refundType = EXCHANGE)
-  exchangeOrderId   String?   // Shopify DraftOrder GID
-  exchangeOrderUrl  String?   // Shopify DraftOrder invoice URL
-  customerId        String?   // Shopify Customer GID (cached for store credit + tracking)
-  labelUrl          String?
-  trackingNumber    String?
-  trackingUrl       String?   // Resolved carrier tracking URL (filled when carrier+number set)
-  carrier           String?
-
-  // Lifecycle timestamps — populated on transition for accurate timeline
-  approvedAt        DateTime?
-  shippedAt         DateTime?
-  receivedAt        DateTime?
-  refundedAt        DateTime?
-  rejectedAt        DateTime?
-
-  // Refund execution details
-  refundId          String?   // Shopify Refund GID (when ORIGINAL_PAYMENT / gift_card)
-  storeCreditTxId   String?   // Shopify StoreCreditAccountTransaction GID
-  storeCreditCode   String?   // Last 4 of gift card, or "Store credit" label
-
-  items             ReturnItem[]
-  notes             InternalNote[]
-  events            ReturnEvent[]
-  
-  settings        ShopSettings   @relation(fields: [shop], references: [shop], onDelete: Cascade)
-
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  id               String         @id @default(cuid())
+  rma              String         @unique
+  shop             String
+  orderId          String
+  orderName        String
+  customerEmail    String
+  customerName     String
+  customerPhone    String?
+  orderDate        DateTime
+  fulfilledDate    DateTime?
+  orderTotal       Float
+  status           String         @default("PENDING")
+  refundType       String         @default("ORIGINAL_PAYMENT")
+  refundAmount     Float          @default(0)
+  storeCreditBonus Float          @default(0)
+  rejectionReason  String?
+  exchangeNote     String?
+  exchangeOrderId  String?
+  exchangeOrderUrl String?
+  customerId       String?
+  labelUrl         String?
+  trackingNumber   String?
+  trackingUrl      String?
+  carrier          String?
+  approvedAt       DateTime?
+  shippedAt        DateTime?
+  receivedAt       DateTime?
+  refundedAt       DateTime?
+  rejectedAt       DateTime?
+  refundId         String?
+  storeCreditTxId  String?
+  storeCreditCode  String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  notes            InternalNote[]
+  events           ReturnEvent[]
+  items            ReturnItem[]
+  settings         ShopSettings   @relation(fields: [shop], references: [shop], onDelete: Cascade)
 }
 
-// Un article dans une demande de retour
 model ReturnItem {
   id              String        @id @default(cuid())
   returnRequestId String
-  lineItemId      String?       // Shopify LineItem GID (for refund API)
-  productId       String        // Shopify Product ID
-  variantId       String        // Shopify Variant ID
+  lineItemId      String?
+  productId       String
+  variantId       String
   name            String
   variantName     String
   quantity        Int
@@ -168,59 +138,87 @@ model ReturnItem {
   reason          String
   note            String?
   imageUrl        String?
-
   returnRequest   ReturnRequest @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
 }
 
-// Audit log d'événements lifecycle pour un retour (timeline en temps réel)
-// Chaque transition de status, événement carrier (in_transit, delivered) ou
-// action notable y est consignée. Sert de "source of truth" pour la Timeline UI.
 model ReturnEvent {
   id              String        @id @default(cuid())
   returnRequestId String
-
-  // Types: REQUESTED, APPROVED, REJECTED, SHIPPED, IN_TRANSIT, OUT_FOR_DELIVERY,
-  // DELIVERED, RECEIVED, REFUNDED, EXCHANGE_CREATED, EXPIRED, NOTE, TRACKING_UPDATED
   type            String
-  source          String        @default("merchant") // merchant | customer | system | carrier
-  title           String        // Short display label
-  detail          String?       // Optional human-readable details
-  meta            String?       // JSON blob for extra structured data (carrier, tracking, location...)
-
-  returnRequest   ReturnRequest @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
-
+  source          String        @default("merchant")
+  title           String
+  detail          String?
+  meta            String?
   createdAt       DateTime      @default(now())
+  returnRequest   ReturnRequest @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
 
   @@index([returnRequestId, createdAt])
 }
 
-// Notes internes pour l'équipe sur une demande de retour
 model InternalNote {
   id              String        @id @default(cuid())
   returnRequestId String
-  author          String        // Name of the user/admin
+  author          String
   text            String
-  
-  returnRequest   ReturnRequest @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
-  
   createdAt       DateTime      @default(now())
+  returnRequest   ReturnRequest @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
 }
 
-// Templates email personnalisables par shop
 model EmailTemplate {
   id        String   @id @default(cuid())
   shop      String
-  type      String   // "Request Received" | "Approved" | "Rejected" | "Refunded"
+  type      String
   subject   String
   body      String
-  
-  @@unique([shop, type])
-  
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@unique([shop, type])
 }
 
-// ---------- Live chat ----------
+model Conversation {
+  id                 String           @id @default(cuid())
+  shop               String
+  type               ConversationType
+  customerEmail      String?
+  customerName       String?
+  unreadByMerchant   Int              @default(0)
+  unreadByCustomer   Int              @default(0)
+  lastMessageAt      DateTime         @default(now())
+  lastMessagePreview String?          @default("")
+  closed             Boolean          @default(false)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  messages           ChatMessage[]
+
+  @@unique([shop, type, customerEmail])
+  @@index([shop, lastMessageAt])
+}
+
+model ChatMessage {
+  id             String         @id @default(cuid())
+  conversationId String
+  senderType     ChatSenderType
+  senderName     String?
+  body           String
+  readAt         DateTime?
+  createdAt      DateTime       @default(now())
+  conversation   Conversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
+
+model BillingSubscription {
+  id              String    @id @default(cuid())
+  shop            String    @unique
+  plan            String    @default("free")
+  shopifyChargeId String?
+  status          String    @default("active")
+  trialEndsAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
 enum ConversationType {
   CLIENT
   SUPPORT
@@ -230,51 +228,4 @@ enum ChatSenderType {
   CLIENT
   MERCHANT
   SUPPORT
-}
-
-model Conversation {
-  id               String   @id @default(cuid())
-  shop             String
-  type             ConversationType
-  // For CLIENT conversations
-  customerEmail    String?
-  customerName     String?
-  // For SUPPORT conversations the "customer" is the merchant themselves
-  unreadByMerchant Int      @default(0)
-  unreadByCustomer Int      @default(0)
-  lastMessageAt    DateTime @default(now())
-  lastMessagePreview String? @default("")
-  closed           Boolean  @default(false)
-  messages         ChatMessage[]
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-
-  @@unique([shop, type, customerEmail])
-  @@index([shop, lastMessageAt])
-}
-
-model ChatMessage {
-  id             String         @id @default(cuid())
-  conversationId String
-  conversation   Conversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  senderType     ChatSenderType
-  senderName     String?
-  body           String
-  readAt         DateTime?
-  createdAt      DateTime       @default(now())
-
-  @@index([conversationId, createdAt])
-}
-
-// Abonnement Shopify Billing
-model BillingSubscription {
-  id                String   @id @default(cuid())
-  shop              String   @unique
-  plan              String   @default("free") // "free" | "starter" | "pro"
-  shopifyChargeId   String?  // Shopify recurring application charge ID
-  status            String   @default("active") // "active" | "cancelled" | "pending"
-  trialEndsAt       DateTime?
-  
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
 }

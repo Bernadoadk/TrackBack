@@ -1,6 +1,6 @@
 import { useState, useEffect, type ReactNode } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
-import { useLoaderData, useSubmit, useNavigation, useActionData } from "react-router";
+import { useLoaderData, useSubmit, useNavigation, useActionData, Link, useLocation } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { PageHeader, Btn, Icon, Toggle, Input, Textarea, Select, useToast } from "../components/ui";
@@ -107,6 +107,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function SettingsPage() {
   const { settings, templates, shop, appUrl, plan } = useLoaderData<typeof loader>();
+  const location = useLocation();
+  const billingHref = `/app/billing${location.search}`;
 
   const tabs = [
     { key: 'General', icon: 'Settings2' },
@@ -400,11 +402,11 @@ function ReasonsTab({ settings, plan }: any) {
             <span className="font-semibold">Custom return reasons require the Pro plan.</span>
             {" "}Upgrade to add, remove, and customize return reasons.
           </p>
-          <a href="/app/billing"
+          <Link to={billingHref}
             className="shrink-0 h-7 px-3 rounded-md text-[12px] font-semibold text-white flex items-center gap-1"
             style={{ background: '#8B5CF6' }}>
             Upgrade <Icon name="ArrowRight" size={12} />
-          </a>
+          </Link>
         </div>
       )}
 

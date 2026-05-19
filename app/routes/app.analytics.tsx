@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { LoaderFunctionArgs } from "react-router";
-import { useLoaderData } from "react-router";
+import { useLoaderData, Link, useLocation } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { PageHeader, Card } from "../components/ui";
@@ -79,6 +79,8 @@ export default function AnalyticsPage() {
   const { p7, p30, p90, plan } = useLoaderData<typeof loader>();
   const isStarter = plan === 'starter' || plan === 'pro';
   const [period, setPeriod] = useState(isStarter ? '30 days' : '7 days');
+  const location = useLocation();
+  const billingHref = `/app/billing${location.search}`;
 
   const pd = period === '7 days' ? p7 : period === '90 days' ? (p90 ?? p7) : (p30 ?? p7);
   const { total, totalRefunded, retainedRevenue, retainedRatio, avgProcessingDays, exchangeRate, chart, topReasons, topProducts } = pd;
@@ -135,11 +137,11 @@ export default function AnalyticsPage() {
             <span className="font-semibold">You're seeing the last 7 days only.</span>
             {" "}Upgrade to Starter for 30 & 90-day analytics.
           </span>
-          <a href="/app/billing"
+          <Link to={billingHref}
             className="shrink-0 h-7 px-3 rounded-md text-[12px] font-semibold text-white flex items-center gap-1"
             style={{ background: '#F59E0B' }}>
             Upgrade
-          </a>
+          </Link>
         </div>
       )}
 

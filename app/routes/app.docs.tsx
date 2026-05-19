@@ -124,7 +124,7 @@ export default function DocsPage() {
         subtitle="Everything you need to set up, run and grow with ReturnFlow."
         right={
           <a
-            href="mailto:support@returnflow.app"
+            href="mailto:bernadoecom@gmail.com"
             className="inline-flex items-center gap-1.5 px-3 h-9 rounded-md text-[12.5px] font-semibold text-ink bg-surface border border-border hover:border-accent2 transition"
           >
             <Icon name="LifeBuoy" size={14} /> Need help?
@@ -541,12 +541,12 @@ export default function DocsPage() {
               </div>
             </div>
             <div className="flex flex-wrap gap-2 justify-center md:justify-end shrink-0">
-              <a href="mailto:support@returnflow.app"
+              <a href="mailto:bernadoecom@gmail.com"
                  className="inline-flex items-center gap-1.5 px-3.5 h-9 rounded-md text-[12.5px] font-semibold text-white"
                  style={{ background: 'linear-gradient(135deg,#6C63FF,#8B5CF6)' }}>
                 <Icon name="Mail" size={13} /> Email support
               </a>
-              <a href="https://returnflow.app/changelog" target="_blank" rel="noreferrer"
+              <a href="https://return-flow-web.vercel.app/changelog.html" target="_blank" rel="noreferrer"
                  className="inline-flex items-center gap-1.5 px-3.5 h-9 rounded-md text-[12.5px] font-semibold text-ink bg-bg/40 border border-border hover:border-accent2 transition">
                 <Icon name="Sparkles" size={13} /> Changelog
               </a>

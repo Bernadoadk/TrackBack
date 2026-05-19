@@ -34,7 +34,16 @@
       "Bash(node scripts/search_docs.mjs \"order query transactions example\" --model claude-sonnet-4-6 --client-name claude-code --client-version 1.0)",
       "Bash(node scripts/validate.mjs --code 'query GetOrderForRefund\\($id: ID!\\) { order\\(id: $id\\) { id currencyCode customer { id email } transactions\\(first: 50\\) { id kind status gateway amountSet { shopMoney { amount currencyCode } } } lineItems\\(first: 50\\) { edges { node { id variant { id } quantity } } } } }' --model claude-sonnet-4-6 --client-name claude-code --client-version 1.0 --artifact-id refund-order-query-001 --revision 1)",
       "Bash(node scripts/validate.mjs --code 'mutation IssueStoreCredit\\($id: ID!, $creditInput: StoreCreditAccountCreditInput!\\) { storeCreditAccountCredit\\(id: $id, creditInput: $creditInput\\) { storeCreditAccountTransaction { id amount { amount currencyCode } account { id balance { amount currencyCode } } } userErrors { field message code } } }' --model claude-sonnet-4-6 --client-name claude-code --client-version 1.0 --artifact-id store-credit-mutation-001 --revision 1)",
-      "Bash(git mv *)"
+      "Bash(git mv *)",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\Bernado ADIKPETO\\\\Desktop\\\\my_project\\\\return-flow-dev\" -Force | Select-Object Name, @{Name=\"Type\"; Expression={if\\($_.PSIsContainer\\){\"Directory\"}else{\"File\"}}} | Sort-Object Name)",
+      "Bash(PGPASSWORD=postgres4 psql -h localhost -U postgres -d returnsflow-db -c \"SELECT id, shop, scope, \\\\\"expires\\\\\" FROM \\\\\"Session\\\\\";\")",
+      "Bash(PGPASSWORD=postgres4 psql -h localhost -U postgres -d returnsflow-db -c \"DELETE FROM \\\\\"Session\\\\\";\")",
+      "Bash(grep -v \"^$\")",
+      "Bash(ls \"C:/Users/Bernado ADIKPETO/Desktop/Victim_projects/ledger-xport/\")",
+      "Bash(ls \"C:/Users/Bernado ADIKPETO/Desktop/Victim_projects/badge-xpress/\" 2>/dev/null | grep -E \"toml|json\" | head -20)",
+      "mcp__shopify-dev-mcp__learn_shopify_api",
+      "mcp__shopify-dev-mcp__search_docs_chunks",
+      "Bash(npx eslint *)"
     ]
   }
 }

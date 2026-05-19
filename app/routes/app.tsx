@@ -34,7 +34,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const isOnSettings = url.pathname.startsWith('/app/settings');
   const onboarding = await getOnboardingState(shop);
   if (!isOnOnboarding && !isOnSettings && onboarding.status === 'pending') {
-    throw redirect('/app/onboarding');
+    // Preserve Shopify embedded-auth params (shop, host, id_token, embedded…)
+    // across the redirect — otherwise authenticate.admin() loses context on
+    // the next request and bounces to /auth/login.
+    throw redirect(`/app/onboarding?${url.searchParams.toString()}`);
   }
 
   // Sync with Shopify FIRST — this is the source of truth for the plan.

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
-import { useLoaderData, useSubmit, useNavigation, useActionData } from "react-router";
+import { useLoaderData, useSubmit, useNavigation, useActionData, Link, useLocation } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { uploadToCloudinary, deleteFromCloudinary, isCloudinaryUrl } from "../lib/cloudinary.server";
@@ -172,6 +172,8 @@ export default function PortalEditorPage() {
   const navigation    = useNavigation();
   const actionData    = useActionData<typeof action>();
   const toast         = useToast();
+  const location      = useLocation();
+  const billingHref   = `/app/billing${location.search}`;
 
   const [s, setS]             = useState<EditorSettings>(initial);
   const [device, setDevice]   = useState<"desktop" | "mobile">("desktop");
@@ -270,11 +272,11 @@ export default function PortalEditorPage() {
             <span className="font-semibold">Portal Editor requires the Starter plan.</span>
             {" "}Upgrade to customize branding, colors, logo and portal texts.
           </p>
-          <a href="/app/billing"
+          <Link to={billingHref}
             className="shrink-0 h-7 px-3 rounded-md text-[12px] font-semibold text-white flex items-center gap-1"
             style={{ background: '#F59E0B' }}>
             Upgrade <Icon name="ArrowRight" size={12} />
-          </a>
+          </Link>
         </div>
       )}
 
@@ -396,11 +398,11 @@ export default function PortalEditorPage() {
                   <Icon name="Lock" size={13} className="text-faint" />
                   Live chat with customers is a Pro feature.
                 </div>
-                <a href="/app/billing"
+                <Link to={billingHref}
                    className="inline-flex items-center gap-1 px-2.5 h-7 rounded-md text-[12px] font-semibold text-white"
                    style={{ background: 'linear-gradient(90deg,#6C63FF,#8B5CF6)' }}>
                   Upgrade <Icon name="ArrowRight" size={12} />
-                </a>
+                </Link>
               </div>
             )}
           </AccordionSection>

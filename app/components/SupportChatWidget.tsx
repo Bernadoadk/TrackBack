@@ -35,6 +35,14 @@ export default function SupportChatWidget() {
 
   useEffect(() => setMounted(true), []);
 
+  // Allow any page to imperatively open the support chat by dispatching
+  // `window.dispatchEvent(new Event('returnflow:open-support-chat'))`.
+  useEffect(() => {
+    const handler = () => setOpen(true);
+    window.addEventListener('returnflow:open-support-chat', handler);
+    return () => window.removeEventListener('returnflow:open-support-chat', handler);
+  }, []);
+
   // Initial load
   useEffect(() => {
     let cancelled = false;
@@ -187,7 +195,7 @@ export default function SupportChatWidget() {
           >
             <div className="flex items-center gap-2.5 min-w-0">
               <div className="w-9 h-9 rounded-full bg-white/20 grid place-content-center shrink-0">
-                <Icon name="LifeBuoy" size={18} strokeWidth={2.25} />
+                <Icon name="MessageCircleMore" size={18} strokeWidth={2.25} />
               </div>
               <div className="min-w-0">
                 <div className="text-[14px] font-semibold leading-tight truncate">
@@ -216,7 +224,7 @@ export default function SupportChatWidget() {
             {messages.length === 0 && (
               <div className="text-center py-8 text-muted text-[13px]">
                 <div className="w-12 h-12 mx-auto mb-2 rounded-full bg-white/[0.04] grid place-content-center">
-                  <Icon name="LifeBuoy" size={20} className="text-accent" />
+                  <Icon name="MessageCircleMore" size={20} className="text-accent" />
                 </div>
                 Need help with the app? Send us a message — we'll get back to
                 you ASAP.
@@ -314,7 +322,7 @@ export default function SupportChatWidget() {
           {open ? (
             <Icon name="X" size={22} />
           ) : (
-            <Icon name="LifeBuoy" size={22} strokeWidth={2.25} />
+            <Icon name="MessageCircleMore" size={22} strokeWidth={2.25} />
           )}
         </div>
         {!open && unread > 0 && (

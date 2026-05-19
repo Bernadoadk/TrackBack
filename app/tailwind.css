@@ -144,12 +144,22 @@
 }
 
 @layer utilities {
-  /* Glass-morphism surface */
+  /* Glass-morphism surface — theme-aware. The dark variant keeps the
+     translucent gradient; the light variant becomes a clean white card
+     with a hairline border and a soft elevation shadow (glass effects
+     don't read well on bright backgrounds). */
   .rf-glass {
     background: linear-gradient(180deg, rgba(34,37,54,0.78), rgba(26,29,39,0.72));
     backdrop-filter: blur(14px) saturate(140%);
     -webkit-backdrop-filter: blur(14px) saturate(140%);
     border: 1px solid rgba(255,255,255,0.06);
+  }
+  :root[data-theme="light"] .rf-glass {
+    background: rgb(var(--c-surface));
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border: 1px solid rgb(var(--c-divider));
+    box-shadow: 0 1px 3px rgba(15,23,42,0.04), 0 1px 2px rgba(15,23,42,0.03);
   }
 
   /* Subtle hairline using inset shadow */
