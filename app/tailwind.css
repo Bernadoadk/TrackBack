@@ -22,11 +22,11 @@
 }
 
 :root[data-theme="light"] {
-  --c-bg:       245 247 250;  /* #F5F7FA */
+  --c-bg:       232 236 243;  /* #E8ECF3 — clearly gray so white cards stand out */
   --c-surface:  255 255 255;  /* #FFFFFF */
   --c-elevated: 249 250 251;  /* #F9FAFB */
-  --c-border:   226 232 240;  /* #E2E8F0 */
-  --c-divider:  237 240 246;  /* #EDF0F6 */
+  --c-border:   215 223 234;  /* #D7DFEA — a hair darker than before to remain visible on the new bg */
+  --c-divider:  226 232 240;  /* #E2E8F0 */
   --c-ink:      15  23  42;   /* #0F172A */
   --c-muted:    100 116 139;  /* #64748B */
   --c-faint:    148 163 184;  /* #94A3B8 */
@@ -160,6 +160,26 @@
     -webkit-backdrop-filter: none;
     border: 1px solid rgb(var(--c-divider));
     box-shadow: 0 1px 3px rgba(15,23,42,0.04), 0 1px 2px rgba(15,23,42,0.03);
+  }
+
+  /* Light-mode card elevation. Any `bg-surface` element that also has a
+     corner radius (rounded-md/lg/xl/2xl) reads as a "card" and gets a soft
+     drop-shadow to separate it from the gray page background. Things like
+     the sidebar and the mobile top bar use bg-surface WITHOUT a corner
+     radius, so they're naturally excluded. */
+  :root[data-theme="light"] .bg-surface.rounded-md,
+  :root[data-theme="light"] .bg-surface.rounded-lg,
+  :root[data-theme="light"] .bg-surface.rounded-xl,
+  :root[data-theme="light"] .bg-surface.rounded-2xl {
+    box-shadow: 0 1px 3px rgba(15,23,42,0.06), 0 1px 2px rgba(15,23,42,0.04);
+  }
+  /* Same treatment for the bg-elevated variant (slightly off-white cards
+     used in onboarding's "Feature" tiles, return-window pills, etc.). */
+  :root[data-theme="light"] .bg-elevated.rounded-md,
+  :root[data-theme="light"] .bg-elevated.rounded-lg,
+  :root[data-theme="light"] .bg-elevated.rounded-xl,
+  :root[data-theme="light"] .bg-elevated.rounded-2xl {
+    box-shadow: 0 1px 2px rgba(15,23,42,0.04);
   }
 
   /* Subtle hairline using inset shadow */
