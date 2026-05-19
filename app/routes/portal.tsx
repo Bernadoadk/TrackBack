@@ -7,7 +7,7 @@ import { getShopPlan } from "../lib/plan.server";
 import { Icon } from "../components/ui";
 import { REFUND_TYPES } from "../components/mock-data";
 import { sendReturnEmail } from "../lib/mailer.server";
-import { getTrackingUrl } from "../lib/carriers.server";
+import { getTrackingUrl } from "../lib/carriers";
 import ChatWidget from "../components/ChatWidget";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {

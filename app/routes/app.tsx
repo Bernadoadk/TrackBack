@@ -1,11 +1,12 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { Outlet, useLoaderData, useRouteError, useNavigation } from "react-router";
+import { Outlet, useLoaderData, useRouteError, useNavigation, redirect } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
 
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { syncBillingFromShopify } from "../lib/plan.server";
+import { getOnboardingState } from "../lib/onboarding.server";
 import { Sidebar, ToastProvider, Icon } from "../components/ui";
 import { useEffect, useState } from "react";
 import SupportChatWidget from "../components/SupportChatWidget";
@@ -23,6 +24,18 @@ declare global {
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
   const shop = session.shop;
+
+  // Onboarding gate — block all /app/* routes until the merchant has either
+  // completed setup or explicitly skipped. The wizard route opts out.
+  // We DON'T gate /app/settings either, so a merchant who skipped can still
+  // go fix things from the standard settings page.
+  const url = new URL(request.url);
+  const isOnOnboarding = url.pathname.startsWith('/app/onboarding');
+  const isOnSettings = url.pathname.startsWith('/app/settings');
+  const onboarding = await getOnboardingState(shop);
+  if (!isOnOnboarding && !isOnSettings && onboarding.status === 'pending') {
+    throw redirect('/app/onboarding');
+  }
 
   // Sync with Shopify FIRST — this is the source of truth for the plan.
   // Doing it here (in the top-level admin layout loader) means every admin
@@ -54,11 +67,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const PLAN_LIMITS: Record<string, number> = { free: 10, starter: 100, pro: 999999 };
   const planLimit: number = PLAN_LIMITS[planName] ?? 10;
 
-  return { apiKey: process.env.SHOPIFY_API_KEY || "", pendingCount, unreadCount, shop, shopName, planName, usedThisMonth, planLimit };
+  return {
+    apiKey: process.env.SHOPIFY_API_KEY || "",
+    pendingCount,
+    unreadCount,
+    shop,
+    shopName,
+    planName,
+    usedThisMonth,
+    planLimit,
+    onboardingStatus: onboarding.status,
+    onboardingMissing: onboarding.missingFields,
+  };
 };
 
 export default function App() {
-  const { apiKey, pendingCount, unreadCount, shop, shopName, planName, usedThisMonth, planLimit } = useLoaderData<typeof loader>();
+  const { apiKey, pendingCount, unreadCount, shop, shopName, planName, usedThisMonth, planLimit, onboardingStatus } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isLoading = navigation.state === "loading" || navigation.state === "submitting";
 
@@ -92,7 +116,7 @@ export default function App() {
         </div>
 
         <div className="min-h-screen flex text-ink relative">
-          <Sidebar pendingCount={pendingCount} unreadCount={unreadCount} shop={shop} shopName={shopName} planName={planName} usedThisMonth={usedThisMonth} planLimit={planLimit} />
+          <Sidebar pendingCount={pendingCount} unreadCount={unreadCount} shop={shop} shopName={shopName} planName={planName} usedThisMonth={usedThisMonth} planLimit={planLimit} onboardingStatus={onboardingStatus} />
           <main className="flex-1 min-w-0 bg-bg h-screen overflow-y-auto relative">
             {/* Soft ambient gradient behind content */}
             <div className="pointer-events-none absolute top-0 left-0 right-0 h-[400px]"

@@ -6,7 +6,8 @@ import prisma from "../db.server";
 import { Icon, StatusBadge, Btn, Card, Modal, Textarea, Toggle, useToast, STATUS_STYLES, Input } from "../components/ui";
 import { REFUND_TYPES } from "../components/mock-data";
 import { sendReturnEmail } from "../lib/mailer.server";
-import { getTrackingUrl, getCarrierDisplayName, getEstimatedTransitLabel } from "../lib/carriers.server";
+import { getTrackingUrl, getCarrierDisplayName, getEstimatedTransitLabel } from "../lib/carriers";
+import { evaluateOnboarding } from "../lib/onboarding.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -27,7 +28,12 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     throw new Response("Not Found", { status: 404 });
   }
 
-  return { returnRequest };
+  const onboarding = evaluateOnboarding(returnRequest.settings);
+  return {
+    returnRequest,
+    onboardingIncomplete: onboarding.status !== 'complete',
+    onboardingMissing: onboarding.missingFields,
+  };
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
@@ -422,7 +428,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 };
 
 export default function ReturnDetailPage() {
-  const { returnRequest } = useLoaderData<typeof loader>();
+  const { returnRequest, onboardingIncomplete, onboardingMissing } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const location = useLocation();
   const toast = useToast();
@@ -950,6 +956,20 @@ export default function ReturnDetailPage() {
           const requested = REFUND_TYPES[r.refundType as string] || REFUND_TYPES['ORIGINAL_PAYMENT'];
           return (
             <div className="space-y-4">
+              {onboardingIncomplete && (
+                <Link to="/app/onboarding"
+                      className="flex items-start gap-2.5 px-3 py-2.5 rounded-md border transition hover:bg-warn/15"
+                      style={{ background: 'rgba(245,158,11,0.08)', borderColor: 'rgba(245,158,11,0.25)' }}>
+                  <Icon name="TriangleAlert" size={14} className="mt-0.5 shrink-0" style={{ color: '#F59E0B' }} />
+                  <div className="flex-1 text-[12.5px]">
+                    <div className="font-semibold" style={{ color: '#F59E0B' }}>Setup incomplete</div>
+                    <div className="text-muted mt-0.5 leading-relaxed">
+                      Missing: {(onboardingMissing || []).join(', ')}. Refund emails may not reach the customer.
+                      <span className="ml-1 font-semibold text-accent2">Finish setup →</span>
+                    </div>
+                  </div>
+                </Link>
+              )}
               <div>
                 <div className="text-[11px] uppercase tracking-wider text-faint font-semibold mb-1.5">Customer requested</div>
                 <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md"

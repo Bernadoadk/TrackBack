@@ -239,7 +239,7 @@ export const NAV = [
   { key: 'billing',          path: '/app/billing',          label: 'Billing',          icon: 'CreditCard' },
 ];
 
-export function Sidebar({ pendingCount, unreadCount = 0, shop, shopName, planName, usedThisMonth, planLimit }: any) {
+export function Sidebar({ pendingCount, unreadCount = 0, shop, shopName, planName, usedThisMonth, planLimit, onboardingStatus }: any) {
   const location = useLocation();
   const currentPath = location.pathname;
 
@@ -257,6 +257,23 @@ export function Sidebar({ pendingCount, unreadCount = 0, shop, shopName, planNam
           draggable={false}
         />
       </div>
+
+      {/* Onboarding incomplete banner */}
+      {onboardingStatus === 'skipped' && (
+        <Link to={`/app/onboarding${location.search}`}
+              className="mx-3 mt-3 group flex items-start gap-2.5 px-3 py-2.5 rounded-lg border transition hover:bg-warn/15"
+              style={{ background: 'rgba(245,158,11,0.08)', borderColor: 'rgba(245,158,11,0.25)' }}>
+          <div className="w-6 h-6 rounded-md grid place-content-center shrink-0"
+               style={{ background: 'rgba(245,158,11,0.18)', color: '#F59E0B' }}>
+            <Icon name="TriangleAlert" size={12} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-[11.5px] font-semibold" style={{ color: '#F59E0B' }}>Setup incomplete</div>
+            <div className="text-[11px] text-muted mt-0.5 leading-snug">Finish setup so refunds work properly.</div>
+          </div>
+          <Icon name="ChevronRight" size={12} className="text-faint mt-1 group-hover:translate-x-0.5 transition-transform" />
+        </Link>
+      )}
 
       {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">

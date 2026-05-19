@@ -33,7 +33,8 @@
       "Bash(node scripts/search_docs.mjs \"Order transactions first nodes example query 2025-10\" --model claude-sonnet-4-6 --client-name claude-code --client-version 1.0)",
       "Bash(node scripts/search_docs.mjs \"order query transactions example\" --model claude-sonnet-4-6 --client-name claude-code --client-version 1.0)",
       "Bash(node scripts/validate.mjs --code 'query GetOrderForRefund\\($id: ID!\\) { order\\(id: $id\\) { id currencyCode customer { id email } transactions\\(first: 50\\) { id kind status gateway amountSet { shopMoney { amount currencyCode } } } lineItems\\(first: 50\\) { edges { node { id variant { id } quantity } } } } }' --model claude-sonnet-4-6 --client-name claude-code --client-version 1.0 --artifact-id refund-order-query-001 --revision 1)",
-      "Bash(node scripts/validate.mjs --code 'mutation IssueStoreCredit\\($id: ID!, $creditInput: StoreCreditAccountCreditInput!\\) { storeCreditAccountCredit\\(id: $id, creditInput: $creditInput\\) { storeCreditAccountTransaction { id amount { amount currencyCode } account { id balance { amount currencyCode } } } userErrors { field message code } } }' --model claude-sonnet-4-6 --client-name claude-code --client-version 1.0 --artifact-id store-credit-mutation-001 --revision 1)"
+      "Bash(node scripts/validate.mjs --code 'mutation IssueStoreCredit\\($id: ID!, $creditInput: StoreCreditAccountCreditInput!\\) { storeCreditAccountCredit\\(id: $id, creditInput: $creditInput\\) { storeCreditAccountTransaction { id amount { amount currencyCode } account { id balance { amount currencyCode } } } userErrors { field message code } } }' --model claude-sonnet-4-6 --client-name claude-code --client-version 1.0 --artifact-id store-credit-mutation-001 --revision 1)",
+      "Bash(git mv *)"
     ]
   }
 }

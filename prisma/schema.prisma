@@ -77,6 +77,10 @@ model ShopSettings {
   liveChatEnabled         Boolean  @default(true)
   liveChatIcon            String   @default("MessageCircle")
 
+  // Onboarding state
+  onboardingCompletedAt   DateTime?
+  onboardingSkippedAt     DateTime?
+
   // Custom reasons
   reasons                 ReturnReason[]
   // Demandes de retour
