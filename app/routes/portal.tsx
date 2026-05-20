@@ -327,6 +327,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   if (intent === "submit_return") {
+   try {
     const orderId = formData.get("orderId") as string;
     const orderName = formData.get("orderName") as string;
     const email = formData.get("email") as string;
@@ -374,92 +375,134 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     const year = new Date().getFullYear();
-    const lastRma = await prisma.returnRequest.findFirst({
-      where: { shop, rma: { startsWith: `RMA-${year}-` } },
-      orderBy: { createdAt: 'desc' },
-      select: { rma: true }
-    });
-    const lastSeq = lastRma ? parseInt(lastRma.rma.split('-')[2] || '0', 10) : 0;
-    const nextSeq = (isNaN(lastSeq) ? 0 : lastSeq) + 1;
-    const rma = `RMA-${year}-${String(nextSeq).padStart(6, '0')}`;
 
-    const returnRequest = await prisma.returnRequest.create({
-      data: {
-        shop,
-        rma,
-        orderId,
-        orderName,
-        customerEmail: email,
-        customerName,
-        orderDate: orderDateStr ? new Date(orderDateStr) : new Date(),
-        orderTotal,
-        refundType,
-        refundAmount: totalRefund,
-        ...(exchangeNote && { exchangeNote }),
-        items: {
-          create: selectedItems.map((item: any) => ({
-            lineItemId: item.lineItemId || null,
-            productId: item.productId,
-            variantId: item.variantId,
-            name: item.name,
-            variantName: item.variant,
-            quantity: item.qty,
-            price: item.price,
-            reason: item.reason,
-            note: item.note || "",
-            imageUrl: item.image
-          }))
+    // Generate a globally-unique RMA. The `rma` column is unique across all
+    // shops, so the sequence must be computed globally — and we retry on
+    // P2002 collisions to be safe under concurrent submissions.
+    let returnRequest;
+    let rma = "";
+    const MAX_ATTEMPTS = 8;
+    let lastError: any = null;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      const lastRma = await prisma.returnRequest.findFirst({
+        where: { rma: { startsWith: `RMA-${year}-` } },
+        orderBy: { rma: 'desc' },
+        select: { rma: true }
+      });
+      const lastSeq = lastRma ? parseInt(lastRma.rma.split('-')[2] || '0', 10) : 0;
+      const nextSeq = (isNaN(lastSeq) ? 0 : lastSeq) + 1 + attempt;
+      rma = `RMA-${year}-${String(nextSeq).padStart(6, '0')}`;
+
+      try {
+        returnRequest = await prisma.returnRequest.create({
+          data: {
+            shop,
+            rma,
+            orderId,
+            orderName,
+            customerEmail: email,
+            customerName,
+            orderDate: orderDateStr ? new Date(orderDateStr) : new Date(),
+            orderTotal,
+            refundType,
+            refundAmount: totalRefund,
+            ...(exchangeNote && { exchangeNote }),
+            items: {
+              create: selectedItems.map((item: any) => ({
+                lineItemId: item.lineItemId || null,
+                productId: item.productId,
+                variantId: item.variantId,
+                name: item.name,
+                variantName: item.variant,
+                quantity: item.qty,
+                price: item.price,
+                reason: item.reason,
+                note: item.note || "",
+                imageUrl: item.image
+              }))
+            }
+          }
+        });
+        break;
+      } catch (e: any) {
+        lastError = e;
+        if (e?.code === 'P2002' && Array.isArray(e?.meta?.target) && e.meta.target.includes('rma')) {
+          console.warn(`[portal] RMA collision on ${rma}, retry attempt ${attempt + 1}/${MAX_ATTEMPTS}`);
+          continue;
         }
+        throw e;
       }
-    });
+    }
+
+    if (!returnRequest) {
+      console.error("[portal] submit_return: exhausted RMA retries:", lastError);
+      return { error: "We couldn't generate a return reference right now. Please try again in a moment." };
+    }
 
     const shopSettings = await prisma.shopSettings.findUnique({ where: { shop } });
 
-    // Confirmation email to customer
-    await sendReturnEmail("Request Received", {
-      to: email,
-      shop,
-      fromEmail: shopSettings?.fromEmail,
-      customer_name: customerName,
-      rma_number: rma,
-      order_number: orderName,
-      item_count: selectedItems.length.toString(),
-    });
-
-    // Auto-approve if enabled
-    if (shopSettings?.autoApprove) {
-      await prisma.returnRequest.update({
-        where: { rma, shop },
-        data: { status: 'APPROVED' }
-      });
-      await sendReturnEmail("Approved", {
+    // Confirmation email to customer (non-fatal if it fails)
+    try {
+      await sendReturnEmail("Request Received", {
         to: email,
         shop,
-        fromEmail: shopSettings.fromEmail,
-        customer_name: customerName,
-        rma_number: rma,
-        order_number: orderName,
-        refund_amount: `$${totalRefund.toFixed(2)}`,
-      });
-    }
-
-    // Merchant notification if enabled
-    if (shopSettings?.notifyMerchant && shopSettings.fromEmail) {
-      await sendReturnEmail("Request Received", {
-        to: shopSettings.fromEmail,
-        shop,
-        fromEmail: shopSettings.fromEmail,
+        fromEmail: shopSettings?.fromEmail,
         customer_name: customerName,
         rma_number: rma,
         order_number: orderName,
         item_count: selectedItems.length.toString(),
       });
+    } catch (e) {
+      console.error("[portal] customer confirmation email failed:", e);
+    }
+
+    // Auto-approve if enabled
+    if (shopSettings?.autoApprove) {
+      try {
+        await prisma.returnRequest.update({
+          where: { rma },
+          data: { status: 'APPROVED' }
+        });
+        await sendReturnEmail("Approved", {
+          to: email,
+          shop,
+          fromEmail: shopSettings.fromEmail,
+          customer_name: customerName,
+          rma_number: rma,
+          order_number: orderName,
+          refund_amount: `$${totalRefund.toFixed(2)}`,
+        });
+      } catch (e) {
+        console.error("[portal] auto-approve flow failed:", e);
+      }
+    }
+
+    // Merchant notification if enabled (non-fatal if it fails)
+    if (shopSettings?.notifyMerchant && shopSettings.fromEmail) {
+      try {
+        await sendReturnEmail("Request Received", {
+          to: shopSettings.fromEmail,
+          shop,
+          fromEmail: shopSettings.fromEmail,
+          customer_name: customerName,
+          rma_number: rma,
+          order_number: orderName,
+          item_count: selectedItems.length.toString(),
+        });
+      } catch (e) {
+        console.error("[portal] merchant notification email failed:", e);
+      }
     }
 
     return { success: true, rma: returnRequest.rma };
+   } catch (e: any) {
+     console.error("[portal] submit_return exception:", e);
+     return { error: "Something went wrong while submitting your return. Please try again, or contact support if the issue persists." };
+   }
   }
 
   if (intent === "submit_tracking") {
+   try {
     const rma = (formData.get("rma") as string).trim().toUpperCase();
     const email = (formData.get("email") as string).trim().toLowerCase();
     const carrier = (formData.get("carrier") as string).trim();
@@ -516,6 +559,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     return { trackingSuccess: true, trackingRma: rma, trackingUrl: trackingUrl ?? null, trackingCarrier: carrier };
+   } catch (e: any) {
+     console.error("[portal] submit_tracking exception:", e);
+     return { trackingError: "Something went wrong while submitting your tracking info. Please try again, or contact support if the issue persists." };
+   }
   }
 
   return null;
