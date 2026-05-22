@@ -8,6 +8,9 @@ import { Icon } from "../components/ui";
 import { REFUND_TYPES } from "../components/mock-data";
 import { sendReturnEmail } from "../lib/mailer.server";
 import { getTrackingUrl, CARRIER_OPTIONS, OTHER_CARRIER } from "../lib/carriers";
+import { createShopifyReturn, approveShopifyReturn } from "../lib/returns-api.server";
+import { unauthenticated } from "../shopify.server";
+import { formatMoney } from "../lib/money";
 import ChatWidget from "../components/ChatWidget";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -92,15 +95,37 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const plan = shop ? await getShopPlan(shop) : 'free';
   // Non-Pro shops always show the TrackBack attribution
-  if (plan !== 'pro' && settings) {
+  if (plan !== 'pro' && plan !== 'pro_annual' && settings) {
     (settings as any).labelPoweredBy = 'Secured by TrackBack';
   }
   // Live chat with customers is a Pro feature — force-disable for lower plans
-  if (plan !== 'pro' && settings) {
+  if (plan !== 'pro' && plan !== 'pro_annual' && settings) {
     (settings as any).liveChatEnabled = false;
   }
+  // Refund types are tier-gated even if the merchant previously enabled them
+  // (e.g. they downgraded from Pro to Free). Defense in depth so portal
+  // customers can't choose a refund type the merchant no longer pays for.
+  const isStarterPlus =
+    plan === 'starter' || plan === 'starter_annual' || plan === 'pro' || plan === 'pro_annual';
+  const isProPlus = plan === 'pro' || plan === 'pro_annual';
+  if (settings) {
+    if (!isStarterPlus) (settings as any).allowStoreCredit = false;
+    if (!isProPlus) (settings as any).allowExchanges = false;
+  }
 
-  return { settings, shop };
+  // Best-effort shop currency lookup — falls back to USD if no admin client
+  // available (e.g. unauthenticated portal in dev).
+  let currency = "USD";
+  try {
+    const { unauthenticated } = await import("../shopify.server");
+    const { admin } = await unauthenticated.admin(shop);
+    const { getShopCurrency } = await import("../lib/shop-currency.server");
+    currency = await getShopCurrency(shop, admin);
+  } catch (err) {
+    // dev mode without session — keep USD default
+  }
+
+  return { settings, shop, currency };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -269,8 +294,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         .map((s: string) => s.trim().toLowerCase())
         .filter(Boolean);
 
-      // Check if order is fulfilled (warn if not)
+      // Block unfulfilled orders — Shopify's native Returns API only accepts
+      // returns on fulfilled line items, so we'd never be able to mirror them
+      // into the merchant's Shopify Admin. Tell the customer to wait.
       const isFulfilled = orderNode.displayFulfillmentStatus !== 'UNFULFILLED';
+      if (!isFulfilled) {
+        return {
+          error:
+            "This order hasn't been shipped yet. You can only request a return once your order has been delivered. Please try again after delivery."
+        };
+      }
 
       const items = orderNode.lineItems.edges
         .filter((edge: any) => edge.node.product && edge.node.variant)
@@ -334,11 +367,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const customerName = (formData.get("customerName") as string) || email.split('@')[0];
     const orderDateStr = formData.get("orderDate") as string;
     const orderTotal = parseFloat(formData.get("orderTotal") as string) || 0;
-    const refundType = formData.get("refundType") as string;
+    let refundType = formData.get("refundType") as string;
     const totalRefund = parseFloat(formData.get("totalRefund") as string);
     const exchangeNote = (formData.get("exchangeNote") as string) || null;
     const selectedItemsStr = formData.get("selectedItems") as string;
     const selectedItems = JSON.parse(selectedItemsStr);
+
+    // Tier guard — fall back to ORIGINAL_PAYMENT if the requested refund type
+    // is not allowed on the current plan (defense against direct form posts).
+    const planForRefund = await getShopPlan(shop);
+    const isStarterPlusRefund =
+      planForRefund === 'starter' || planForRefund === 'starter_annual' ||
+      planForRefund === 'pro' || planForRefund === 'pro_annual';
+    const isProPlusRefund = planForRefund === 'pro' || planForRefund === 'pro_annual';
+    if (refundType === 'STORE_CREDIT' && !isStarterPlusRefund) {
+      console.warn(`[portal] rejecting STORE_CREDIT for plan=${planForRefund}, downgrading to ORIGINAL_PAYMENT`);
+      refundType = 'ORIGINAL_PAYMENT';
+    }
+    if (refundType === 'EXCHANGE' && !isProPlusRefund) {
+      console.warn(`[portal] rejecting EXCHANGE for plan=${planForRefund}, downgrading to ORIGINAL_PAYMENT`);
+      refundType = 'ORIGINAL_PAYMENT';
+    }
 
     // Blocklist check: reject if any selected item is blocked
     const shopSettings2 = await prisma.shopSettings.findUnique({ where: { shop } });
@@ -439,6 +488,72 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return { error: "We couldn't generate a return reference right now. Please try again in a moment." };
     }
 
+    // ── Mirror the return into Shopify Admin so the merchant sees it natively.
+    // Uses the offline session for the shop (the portal request runs via App
+    // Proxy and has no admin client by default). Non-fatal on failure — the
+    // local return still exists; the dashboard's syncReturnsForShop loader
+    // will reconcile if Shopify later creates the same return via webhook.
+    let shopifyReturnIdCreated: string | null = null;
+    try {
+      console.log(
+        `[portal] mirror to Shopify START rma=${rma} shop=${shop} orderId=${orderId}`,
+      );
+      const { admin: offlineAdmin } = await unauthenticated.admin(shop);
+      const result = await createShopifyReturn(
+        offlineAdmin,
+        orderId,
+        selectedItems.map((it: any) => ({
+          lineItemId: it.lineItemId,
+          quantity: it.qty,
+          reason: it.reason,
+          note: it.note || "",
+        })),
+      );
+      if (result.shopifyReturnId) {
+        shopifyReturnIdCreated = result.shopifyReturnId;
+        await prisma.returnRequest.update({
+          where: { id: returnRequest.id },
+          data: { shopifyReturnId: result.shopifyReturnId },
+        });
+        console.log(
+          `[portal] mirror to Shopify OK rma=${rma} shopifyReturnId=${result.shopifyReturnId}`,
+        );
+      } else {
+        const errorDetail = result.userErrors
+          .map((e: any) => e.message)
+          .join("; ");
+        console.warn(
+          `[portal] mirror to Shopify FAILED rma=${rma} errors=${errorDetail}`,
+        );
+        // Persist the failure so the merchant dashboard can show a warning +
+        // offer a manual retry. We store it on the return's events log.
+        try {
+          await prisma.returnEvent.create({
+            data: {
+              returnRequestId: returnRequest.id,
+              type: "SHOPIFY_MIRROR_FAILED",
+              source: "system",
+              title: "Not synced to Shopify Admin",
+              detail: errorDetail,
+            },
+          });
+        } catch (_e) { /* non-fatal */ }
+      }
+    } catch (e: any) {
+      console.error("[portal] mirror to Shopify Admin threw:", e?.message ?? e);
+      try {
+        await prisma.returnEvent.create({
+          data: {
+            returnRequestId: returnRequest.id,
+            type: "SHOPIFY_MIRROR_FAILED",
+            source: "system",
+            title: "Not synced to Shopify Admin",
+            detail: `Unhandled error: ${e?.message ?? String(e)}`,
+          },
+        });
+      } catch (_e) { /* non-fatal */ }
+    }
+
     const shopSettings = await prisma.shopSettings.findUnique({ where: { shop } });
 
     // Confirmation email to customer (non-fatal if it fails)
@@ -463,6 +578,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           where: { rma },
           data: { status: 'APPROVED' }
         });
+        // Propagate approval to Shopify so the native Return moves REQUESTED → OPEN.
+        if (shopifyReturnIdCreated) {
+          try {
+            const { admin: offlineAdmin } = await unauthenticated.admin(shop);
+            await approveShopifyReturn(offlineAdmin, shopifyReturnIdCreated);
+          } catch (e) {
+            console.error("[portal] auto-approve Shopify mirror failed:", e);
+          }
+        }
+        // Best-effort currency lookup for the email — falls back to USD.
+        let portalCurrency = "USD";
+        try {
+          if (admin) {
+            const { getShopCurrency } = await import("../lib/shop-currency.server");
+            portalCurrency = await getShopCurrency(shop, admin);
+          }
+        } catch { /* keep USD */ }
         await sendReturnEmail("Approved", {
           to: email,
           shop,
@@ -470,7 +602,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           customer_name: customerName,
           rma_number: rma,
           order_number: orderName,
-          refund_amount: `$${totalRefund.toFixed(2)}`,
+          refund_amount: formatMoney(totalRefund, portalCurrency),
         });
       } catch (e) {
         console.error("[portal] auto-approve flow failed:", e);
@@ -569,7 +701,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function PortalPage() {
-  const { settings, shop } = useLoaderData<typeof loader>();
+  const { settings, shop, currency } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
 
   const [step, setStep] = useState(1);
@@ -591,7 +723,11 @@ export default function PortalPage() {
         setOrderData(data.order);
         setStep(2);
       }
-      if (data.success && data.rma && step === 5) {
+      // `data.rma` is only returned by the submit_return action, so checking
+      // it is enough — no need to gate on a hardcoded step number (which broke
+      // for free-plan merchants where the refund-type step is skipped, making
+      // confirm = step 4 not 5).
+      if (data.success && data.rma) {
         setSubmittedRma(data.rma);
       }
       if (data.trackingSuccess) {
@@ -777,6 +913,7 @@ export default function PortalPage() {
             <StepSelectItems items={orderData.items} orderName={orderData.name} date={orderData.createdAt}
               isFulfilled={orderData.isFulfilled}
               shopSettings={settings}
+              currency={currency}
               selectedItems={selectedItems} setSelectedItems={setSelectedItems}
               onBack={() => go(1)} onNext={() => canContinue[2] && go(3)} canContinue={canContinue[2]} />
           )}
@@ -793,12 +930,14 @@ export default function PortalPage() {
               refundType={refundType} setRefundType={setRefundType}
               exchangeNote={exchangeNote} setExchangeNote={setExchangeNote}
               totalRefund={totalRefund} shopSettings={settings} totalSteps={STEPS.length}
+              currency={currency}
               onBack={() => go(prevFrom(4))} onNext={() => canContinue[4] && go(nextFrom(4))} canContinue={canContinue[4]} />
           )}
           {step === confirmStep && (
             <StepConfirm itemsList={itemsList} selectedItems={selectedItems} reasons={reasons} notes={notes}
               totalRefund={totalRefund} email={email}
               refundType={refundType} shopSettings={settings}
+              currency={currency}
               totalSteps={STEPS.length} isLoading={fetcher.state !== 'idle'}
               error={(fetcher.data as any)?.error}
               onBack={() => go(prevFrom(confirmStep))} onSubmit={handleSubmitReturn} />
@@ -1305,7 +1444,9 @@ function StepFindOrder({ orderNum, setOrderNum, email, setEmail, onNext, canCont
         </PortalBtn>
       </div>
 
-      {/* Tracking submission panel */}
+      {/* Tracking submission panel — hidden when shop provides return labels
+          (the merchant tracks the package themselves via the label). */}
+      {shopSettings?.returnShippingMethod !== 'merchant_provides_label' && (
       <div className="mt-8 pt-6 border-t border-[#e6e6ec]">
         <button onClick={() => setShowTracking(v => !v)}
           className="w-full flex items-center justify-between text-[13px] font-medium text-[#444] hover:text-[#111] transition">
@@ -1337,11 +1478,12 @@ function StepFindOrder({ orderNum, setOrderNum, email, setEmail, onNext, canCont
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }
 
-function StepSelectItems({ items, orderName, date, isFulfilled, shopSettings, selectedItems, setSelectedItems, onBack, onNext, canContinue }: any) {
+function StepSelectItems({ items, orderName, date, isFulfilled, shopSettings, currency, selectedItems, setSelectedItems, onBack, onNext, canContinue }: any) {
   const toggleItem = (id: string, blocked: boolean) => {
     if (blocked) return;
     setSelectedItems((s: any) => {
@@ -1407,7 +1549,7 @@ function StepSelectItems({ items, orderName, date, isFulfilled, shopSettings, se
                   <button onClick={() => setQty(item.id, qty + 1, item.quantity)} className="w-7 h-8 text-[#666] hover:bg-[#f0f0f5]">+</button>
                 </div>
               )}
-              <div className="text-[14px] font-semibold text-[#0f1117] tabular-nums w-16 text-right">${item.price.toFixed(2)}</div>
+              <div className="text-[14px] font-semibold text-[#0f1117] tabular-nums w-16 text-right">{formatMoney(item.price, currency)}</div>
             </label>
           );
         })}
@@ -1475,7 +1617,7 @@ function StepReasons({ itemsList, reasons, setReasons, notes, setNotes, onBack, 
   );
 }
 
-function StepRefundType({ availableRefundTypes, refundType, setRefundType, exchangeNote, setExchangeNote, totalRefund, shopSettings, onBack, onNext, canContinue, totalSteps }: any) {
+function StepRefundType({ availableRefundTypes, refundType, setRefundType, exchangeNote, setExchangeNote, totalRefund, shopSettings, currency, onBack, onNext, canContinue, totalSteps }: any) {
   const showBonus = shopSettings.incentivizeStoreCredit && shopSettings.storeCreditBonusPercent > 0;
   const bonusPct = shopSettings.storeCreditBonusPercent;
   const bonusAmount = totalRefund * (bonusPct / 100);
@@ -1492,7 +1634,7 @@ function StepRefundType({ availableRefundTypes, refundType, setRefundType, excha
       title: 'Store credit',
       desc: 'Get store credit to use on your next purchase. Available instantly.',
       badge: { icon: 'Zap', label: 'Instant', kind: 'accent' },
-      bonusBadge: showBonus ? { label: `+${bonusPct}% bonus credit`, amount: `Get $${(totalRefund + bonusAmount).toFixed(2)} instead of $${totalRefund.toFixed(2)}` } : null,
+      bonusBadge: showBonus ? { label: `+${bonusPct}% bonus credit`, amount: `Get ${formatMoney(totalRefund + bonusAmount, currency)} instead of ${formatMoney(totalRefund, currency)}` } : null,
     },
     EXCHANGE: {
       icon: 'RefreshCw',
@@ -1593,7 +1735,7 @@ function StepRefundType({ availableRefundTypes, refundType, setRefundType, excha
   );
 }
 
-function StepConfirm({ itemsList, selectedItems, reasons, notes, totalRefund, onBack, onSubmit, refundType, shopSettings, totalSteps, isLoading, error }: any) {
+function StepConfirm({ itemsList, selectedItems, reasons, notes, totalRefund, onBack, onSubmit, refundType, shopSettings, currency, totalSteps, isLoading, error }: any) {
   const meta = REFUND_TYPES[refundType] || REFUND_TYPES['ORIGINAL_PAYMENT'];
   const showBonus = refundType === 'STORE_CREDIT' && shopSettings.incentivizeStoreCredit && shopSettings.storeCreditBonusPercent > 0;
   const bonusAmount = showBonus ? totalRefund * (shopSettings.storeCreditBonusPercent / 100) : 0;
@@ -1624,7 +1766,7 @@ function StepConfirm({ itemsList, selectedItems, reasons, notes, totalRefund, on
             <div className="flex-1 min-w-0">
               <div className="flex justify-between gap-3">
                 <div className="text-[13.5px] font-semibold text-[#0f1117] truncate">{item.name}</div>
-                <div className="text-[13.5px] font-semibold tabular-nums">${(item.price * selectedItems[item.id].qty).toFixed(2)}</div>
+                <div className="text-[13.5px] font-semibold tabular-nums">{formatMoney(item.price * selectedItems[item.id].qty, currency)}</div>
               </div>
               <div className="text-[12px] text-[#666] mt-0.5 truncate">{item.variant} · Qty {selectedItems[item.id].qty}</div>
               <div className="mt-1.5 flex flex-wrap gap-1.5 text-[11.5px]">
@@ -1637,18 +1779,18 @@ function StepConfirm({ itemsList, selectedItems, reasons, notes, totalRefund, on
       </div>
 
       <div className="mt-5 p-4 rounded-xl bg-[#fafbfc] border border-[#e6e6ec]">
-        <div className="flex justify-between text-[13px] text-[#666]"><span>Subtotal</span><span className="tabular-nums">${totalRefund.toFixed(2)}</span></div>
-        <div className="flex justify-between text-[13px] text-[#666] mt-1"><span>Restocking fee</span><span className="tabular-nums">−$0.00</span></div>
+        <div className="flex justify-between text-[13px] text-[#666]"><span>Subtotal</span><span className="tabular-nums">{formatMoney(totalRefund, currency)}</span></div>
+        <div className="flex justify-between text-[13px] text-[#666] mt-1"><span>Restocking fee</span><span className="tabular-nums">−{formatMoney(0, currency)}</span></div>
         {showBonus && (
           <div className="flex justify-between text-[13px] mt-1" style={{ color: 'var(--brand)' }}>
             <span className="flex items-center gap-1"><Icon name="Sparkles" size={11} /> Store credit bonus (+{shopSettings.storeCreditBonusPercent}%)</span>
-            <span className="tabular-nums">+${bonusAmount.toFixed(2)}</span>
+            <span className="tabular-nums">+{formatMoney(bonusAmount, currency)}</span>
           </div>
         )}
         <div className="border-t border-[#e6e6ec] my-2.5"></div>
         <div className="flex justify-between text-[15px] font-bold text-[#0f1117]">
           <span>{refundType === 'EXCHANGE' ? 'Estimated value' : showBonus ? 'Total store credit' : 'Estimated refund'}</span>
-          <span className="tabular-nums">${(showBonus ? creditTotal : totalRefund).toFixed(2)}</span>
+          <span className="tabular-nums">{formatMoney(showBonus ? creditTotal : totalRefund, currency)}</span>
         </div>
 
         <div className="mt-3 pt-3 border-t border-[#e6e6ec] flex items-center justify-between gap-3">
@@ -1657,7 +1799,7 @@ function StepConfirm({ itemsList, selectedItems, reasons, notes, totalRefund, on
             style={{ background: meta.bg, color: meta.color }}>
             <Icon name={meta.icon} size={12} />
             {refundType === 'ORIGINAL_PAYMENT' && 'Refund to original payment (5–10 days)'}
-            {refundType === 'STORE_CREDIT' && `Store credit · $${(showBonus ? creditTotal : totalRefund).toFixed(2)}`}
+            {refundType === 'STORE_CREDIT' && `Store credit · ${formatMoney(showBonus ? creditTotal : totalRefund, currency)}`}
             {refundType === 'EXCHANGE' && 'Exchange · item selection after submission'}
           </span>
         </div>
@@ -1676,22 +1818,30 @@ function StepConfirm({ itemsList, selectedItems, reasons, notes, totalRefund, on
 function PortalConfirmation({ rma, email, refundType, settings, onReset }: any) {
   const isExchange = refundType === 'EXCHANGE';
   const isStoreCredit = refundType === 'STORE_CREDIT';
+  const merchantProvidesLabel =
+    settings?.returnShippingMethod === 'merchant_provides_label';
+
+  // Step 2 differs based on shipping method — the most important difference
+  // the customer needs to know about.
+  const shipStep = merchantProvidesLabel
+    ? `Once approved, you'll receive a prepaid shipping label at ${email}.`
+    : `Once approved, ship the items back to the address you'll receive at ${email}, then submit your tracking number on this page.`;
 
   const steps = isExchange
     ? [
       'Your exchange request is being reviewed by our team.',
-      `Once approved, you'll receive a prepaid shipping label at ${email}.`,
-      "Ship the item back and we'll send your replacement once received.",
+      shipStep,
+      "Once we receive your return, we'll send your replacement.",
     ]
     : isStoreCredit
       ? [
         'Your request will be reviewed by our team.',
-        `Once approved, you'll receive a prepaid shipping label at ${email}.`,
+        shipStep,
         'Your store credit code will be emailed as soon as we receive your item.',
       ]
       : [
         'Your request will be reviewed by our team.',
-        `Once approved, you'll receive a prepaid shipping label at ${email}.`,
+        shipStep,
         'Once received, your refund is issued within 3–5 business days.',
       ];
 

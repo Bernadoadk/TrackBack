@@ -5,6 +5,9 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { PageHeader, Btn, Icon, Select, StatusBadge } from "../components/ui";
 import { sendReturnEmail } from "../lib/mailer.server";
+import { syncReturnsForShop } from "../lib/returns-sync.server";
+import { getShopCurrency } from "../lib/shop-currency.server";
+import { formatMoney, currencySymbol } from "../lib/money";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -26,8 +29,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
   const shop = session.shop;
+
+  // Pull native Shopify Returns into the local DB so they appear here too.
+  await syncReturnsForShop(shop, admin);
 
   // Auto-expire: find APPROVED returns older than autoExpireDays with no shipping
   const shopSettings = await prisma.shopSettings.findUnique({ where: { shop } });
@@ -56,17 +62,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   }
 
-  const returnRequests = await prisma.returnRequest.findMany({
-    where: { shop: session.shop },
-    include: { items: true },
-    orderBy: { createdAt: 'desc' }
-  });
+  const [returnRequests, currency] = await Promise.all([
+    prisma.returnRequest.findMany({
+      where: { shop: session.shop },
+      include: { items: true },
+      orderBy: { createdAt: 'desc' }
+    }),
+    getShopCurrency(shop, admin),
+  ]);
 
-  return { returnRequests };
+  return { returnRequests, currency };
 };
 
 export default function ReturnsPage() {
-  const { returnRequests } = useLoaderData<typeof loader>();
+  const { returnRequests, currency } = useLoaderData<typeof loader>();
 
   const [tab, setTab] = useState('All');
   const [query, setQuery] = useState('');
@@ -103,7 +112,7 @@ export default function ReturnsPage() {
 
   const handleExportCSV = (scope: 'filtered' | 'all' = 'filtered') => {
     const rows = scope === 'all' ? listData : filtered;
-    const CSV_HEADERS = ['RMA', 'Order #', 'Customer', 'Email', 'Phone', 'Status', 'Refund Type', 'Amount ($)', 'Items', 'Date'];
+    const CSV_HEADERS = ['RMA', 'Order #', 'Customer', 'Email', 'Phone', 'Status', 'Refund Type', `Amount (${currency})`, 'Items', 'Date'];
     const csvRows = [
       CSV_HEADERS,
       ...rows.map((r: any) => [
@@ -316,7 +325,7 @@ export default function ReturnsPage() {
                     </td>
                     <td className="py-3.5 text-muted">{r.date}</td>
                     <td className="py-3.5 text-muted">{r.itemsCount}</td>
-                    <td className="py-3.5 text-right tabular-nums text-ink font-medium">${r.amount.toFixed(2)}</td>
+                    <td className="py-3.5 text-right tabular-nums text-ink font-medium">{formatMoney(r.amount, currency)}</td>
                     <td className="py-3.5 pl-4"><StatusBadge status={r.status} /></td>
                     <td className="py-3.5 pr-5 text-right relative z-10" onClick={(e) => e.stopPropagation()}>
                       <Link to={`/app/returns/${r.rma}${location.search}`}

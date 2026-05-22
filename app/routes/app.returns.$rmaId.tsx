@@ -8,29 +8,58 @@ import { REFUND_TYPES } from "../components/mock-data";
 import { sendReturnEmail } from "../lib/mailer.server";
 import { getTrackingUrl, getCarrierDisplayName, getEstimatedTransitLabel, CARRIER_OPTIONS, OTHER_CARRIER } from "../lib/carriers";
 import { evaluateOnboarding } from "../lib/onboarding.server";
+import { approveShopifyReturn, attachShippingToShopifyReturn, closeShopifyReturn, declineShopifyReturn } from "../lib/returns-api.server";
+import { getShopCurrency } from "../lib/shop-currency.server";
+import { formatMoney, currencySymbol } from "../lib/money";
+import { ProductPicker, type PickedVariant } from "../components/ProductPicker";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
   const shop = session.shop;
   const { rmaId } = params;
 
-  const returnRequest = await prisma.returnRequest.findUnique({
-    where: { rma: rmaId, shop },
-    include: {
-      items: true,
-      notes: { orderBy: { createdAt: 'desc' } },
-      events: { orderBy: { createdAt: 'asc' } },
-      settings: true
-    }
-  });
+  const [returnRequest, currency] = await Promise.all([
+    prisma.returnRequest.findUnique({
+      where: { rma: rmaId, shop },
+      include: {
+        items: true,
+        notes: { orderBy: { createdAt: 'desc' } },
+        events: { orderBy: { createdAt: 'asc' } },
+        settings: true
+      }
+    }),
+    getShopCurrency(shop, admin),
+  ]);
 
   if (!returnRequest) {
     throw new Response("Not Found", { status: 404 });
   }
 
+  // Fetch how much is still refundable on the original payment for this
+  // order: totalReceived − totalRefunded. Surfaced in the Refund modal as
+  // "F CFA X available for refund". Non-fatal on failure — falls back to
+  // the order total stored locally.
+  let maxRefundable: number | null = null;
+  try {
+    const resp = await admin.graphql(`#graphql
+      query OrderRefundable($id: ID!) {
+        order(id: $id) {
+          totalReceivedSet { shopMoney { amount } }
+          totalRefundedSet { shopMoney { amount } }
+        }
+      }`, { variables: { id: returnRequest.orderId } });
+    const json: any = await resp.json();
+    const received = parseFloat(json?.data?.order?.totalReceivedSet?.shopMoney?.amount ?? '0');
+    const refunded = parseFloat(json?.data?.order?.totalRefundedSet?.shopMoney?.amount ?? '0');
+    maxRefundable = Math.max(0, received - refunded);
+  } catch (err) {
+    console.error('[app.returns.$rmaId] maxRefundable fetch failed:', err);
+  }
+
   const onboarding = evaluateOnboarding(returnRequest.settings);
   return {
-    returnRequest,
+    returnRequest: { ...returnRequest, maxRefundable },
+    currency,
     onboardingIncomplete: onboarding.status !== 'complete',
     onboardingMissing: onboarding.missingFields,
   };
@@ -40,6 +69,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
   const shop = session.shop;
   const { rmaId } = params;
+  // Currency for amount-formatted strings in events / emails. Lazy lookup,
+  // falls back to "USD" if Shopify shop query fails.
+  const currency = await getShopCurrency(shop, admin);
 
   const formData = await request.formData();
   const intent = formData.get("intent");
@@ -74,6 +106,33 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
     await prisma.returnRequest.update({ where: { rma: rmaId, shop }, data: updateData });
 
+    // Propagate state changes to the Shopify native Return so the merchant's
+    // Admin stays in sync. Only if we have a linked shopifyReturnId — returns
+    // created directly in TrackBack without a Shopify mirror are skipped.
+    //
+    // Mapping:
+    //   APPROVED → returnApproveRequest        (REQUESTED → OPEN)
+    //   REJECTED → returnDeclineRequest        (REQUESTED → DECLINED)
+    //   SHIPPED  → reverseDeliveryCreateWithShipping  (attach tracking)
+    //   RECEIVED → no Shopify equivalent       (stays OPEN until refund)
+    //   REFUNDED → handled in process_refund   (refundCreate + returnClose)
+    if (rr.shopifyReturnId) {
+      try {
+        if (status === 'APPROVED') {
+          await approveShopifyReturn(admin, rr.shopifyReturnId);
+        } else if (status === 'REJECTED') {
+          await declineShopifyReturn(admin, rr.shopifyReturnId, 'OTHER');
+        } else if (status === 'SHIPPED') {
+          await attachShippingToShopifyReturn(admin, rr.shopifyReturnId, {
+            number: trackingNumber ?? rr.trackingNumber,
+            url: trackingUrl ?? rr.trackingUrl,
+          });
+        }
+      } catch (e) {
+        console.error('[returns.$rmaId] Shopify mirror update failed:', e);
+      }
+    }
+
     // Audit event
     const eventTitle: Record<string, string> = {
       APPROVED: 'Return Approved',
@@ -105,7 +164,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         customer_name: rr.customerName || rr.customerEmail.split('@')[0],
         rma_number: rr.rma,
         order_number: rr.orderName,
-        refund_amount: `$${rr.refundAmount.toFixed(2)}`,
+        refund_amount: formatMoney(rr.refundAmount, currency),
         label_url: labelUrl || undefined
       });
     } else if (status === 'SHIPPED') {
@@ -274,7 +333,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           return { error: "This order has no linked customer account, so store credit cannot be issued. Use ORIGINAL_PAYMENT instead, or invite the customer to create an account." };
         }
 
-        const currency = order.currencyCode || 'USD';
+        // Use the order's currency (not the shop's) for the store credit
+        // mutation — Shopify requires them to match the order being credited.
+        const orderCurrency = order.currencyCode || currency;
 
         // 1) Credit the customer's store credit account (creates one if needed)
         const creditRes = await admin.graphql(`#graphql
@@ -291,7 +352,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           variables: {
             id: customerId,
             creditInput: {
-              creditAmount: { amount: refundAmount.toFixed(2), currencyCode: currency },
+              creditAmount: { amount: refundAmount.toFixed(2), currencyCode: orderCurrency },
             }
           }
         });
@@ -301,7 +362,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           return { error: `Failed to issue store credit: ${creditErrors.map((e: any) => e.message).join(', ')}` };
         }
         storeCreditTxId = creditData.data?.storeCreditAccountCredit?.storeCreditAccountTransaction?.id ?? null;
-        storeCreditCode = `$${refundAmount.toFixed(2)} ${currency} store credit`;
+        storeCreditCode = `${formatMoney(refundAmount, orderCurrency)} store credit`;
 
         // 2) Notional refund (no money movement) so Shopify restocks items + marks
         //    the order as refunded. Empty transactions = "refund without payment".
@@ -332,8 +393,33 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         return { error: `Failed to create store credit: ${e?.message || 'unknown error'}` };
       }
 
-      // ─── EXCHANGE (draft order + invoice email) ───────────────────────────
+      // ─── EXCHANGE (draft order with real replacement variant) ─────────────
+      //
+      // New flow (Phase C): merchant picks the exact replacement variant via
+      // the ProductPicker. We create a draft order with that variant as a
+      // real line item, apply the returned items' total as a discount, and
+      // settle any price difference via invoice or refund per the merchant's
+      // choice.
     } else if (refundMethod === 'EXCHANGE') {
+      const exchangeVariantId = formData.get("exchangeVariantId") as string | null;
+      const exchangeVariantPrice = parseFloat(formData.get("exchangeVariantPrice") as string ?? "0");
+      const exchangeQty = parseInt(formData.get("exchangeQty") as string ?? "1", 10) || 1;
+      const diffSettlement = (formData.get("diffSettlement") as string) || 'INVOICE_DIFFERENCE';
+
+      if (!exchangeVariantId) {
+        return { error: 'Pick a replacement product before creating the exchange.' };
+      }
+
+      const returnedCredit = rr.items.reduce(
+        (s: number, it: any) => s + it.price * it.quantity,
+        0,
+      );
+      const replacementTotal = exchangeVariantPrice * exchangeQty;
+      const diff = replacementTotal - returnedCredit;
+      // Cap the credit at the replacement total — we never want a discount
+      // larger than the line item (Shopify would reject it anyway).
+      const discountValue = Math.min(returnedCredit, replacementTotal);
+
       try {
         const draftOrderRes = await admin.graphql(`#graphql
           mutation DraftOrderCreate($input: DraftOrderInput!) {
@@ -345,20 +431,20 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           variables: {
             input: {
               email: rr.customerEmail,
-              note: rr.exchangeNote || 'Exchange request',
+              note: rr.exchangeNote
+                ? `Exchange request: ${rr.exchangeNote}`
+                : `Exchange for return ${rr.rma}`,
               lineItems: [{
-                title: `Exchange — ${rr.exchangeNote || 'Replacement item'}`,
-                originalUnitPrice: refundAmount.toFixed(2),
-                quantity: 1,
-                requiresShipping: true,
+                variantId: exchangeVariantId,
+                quantity: exchangeQty,
               }],
               appliedDiscount: {
-                value: refundAmount,
-                amount: refundAmount,
+                value: discountValue,
+                amount: discountValue,
                 valueType: "FIXED_AMOUNT",
-                title: `Return credit ${rmaId}`,
+                title: `Return credit ${rr.rma}`,
               },
-              tags: [`exchange`, `return-${rmaId}`],
+              tags: [`exchange`, `return-${rr.rma}`],
             }
           }
         });
@@ -372,20 +458,110 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           exchangeOrderId = draftOrder.id;
           exchangeOrderUrl = draftOrder.invoiceUrl;
 
-          // Auto-send the invoice email so the customer can complete the exchange purchase.
-          const sendRes = await admin.graphql(`#graphql
-            mutation SendInvoice($id: ID!) {
-              draftOrderInvoiceSend(id: $id) {
-                draftOrder { id invoiceSentAt }
-                userErrors { field message }
-              }
-            }`, { variables: { id: draftOrder.id } });
-          const sendData = await sendRes.json();
-          const sendErrors = sendData.data?.draftOrderInvoiceSend?.userErrors || [];
-          if (sendErrors.length > 0) {
-            // Don't block — the draft order was created. Surface a warning via event.
-            console.warn('draftOrderInvoiceSend errors:', sendErrors);
+          // If the customer owes a difference → invoice them to complete checkout.
+          // Otherwise (even or replacement < returned credit) we don't invoice;
+          // the draft is fully discounted and ready to be fulfilled directly,
+          // or any negative diff is settled via the chosen settlement below.
+          if (diff > 0.001 || diffSettlement === 'INVOICE_DIFFERENCE') {
+            const sendRes = await admin.graphql(`#graphql
+              mutation SendInvoice($id: ID!) {
+                draftOrderInvoiceSend(id: $id) {
+                  draftOrder { id invoiceSentAt }
+                  userErrors { field message }
+                }
+              }`, { variables: { id: draftOrder.id } });
+            const sendData = await sendRes.json();
+            const sendErrors = sendData.data?.draftOrderInvoiceSend?.userErrors || [];
+            if (sendErrors.length > 0) {
+              console.warn('draftOrderInvoiceSend errors:', sendErrors);
+            }
           }
+        }
+
+        // Settle the difference when the replacement is cheaper than the returned items.
+        if (diff < -0.001) {
+          const diffAbs = -diff;
+          if (diffSettlement === 'REFUND_DIFFERENCE') {
+            // Best-effort refund of the diff to the original payment.
+            try {
+              const orderRes = await admin.graphql(`#graphql
+                query GetOrderForDiffRefund($id: ID!) {
+                  order(id: $id) {
+                    currencyCode
+                    transactions(first: 50) {
+                      id kind status gateway
+                    }
+                  }
+                }`, { variables: { id: rr.orderId } });
+              const orderData = await orderRes.json();
+              const txs: any[] = orderData?.data?.order?.transactions ?? [];
+              const saleTx = txs.find((t: any) => (t.kind === 'SALE' || t.kind === 'CAPTURE') && t.status === 'SUCCESS');
+              if (saleTx) {
+                const refundRes = await admin.graphql(`#graphql
+                  mutation RefundCreate($input: RefundInput!) {
+                    refundCreate(input: $input) {
+                      refund { id }
+                      userErrors { field message }
+                    }
+                  }`, {
+                  variables: {
+                    input: {
+                      orderId: rr.orderId,
+                      transactions: [{
+                        orderId: rr.orderId,
+                        parentId: saleTx.id,
+                        amount: diffAbs.toFixed(2),
+                        kind: "REFUND",
+                        gateway: saleTx.gateway,
+                      }],
+                      notify: true,
+                    }
+                  }
+                });
+                const refundJson = await refundRes.json();
+                refundId = refundJson?.data?.refundCreate?.refund?.id ?? refundId;
+              }
+            } catch (e) {
+              console.error('[exchange] diff refund failed:', e);
+            }
+          } else if (diffSettlement === 'STORE_CREDIT_DIFFERENCE') {
+            // Issue store credit for the difference.
+            try {
+              const orderRes = await admin.graphql(`#graphql
+                query GetOrderForDiffCredit($id: ID!) {
+                  order(id: $id) {
+                    currencyCode
+                    customer { id }
+                  }
+                }`, { variables: { id: rr.orderId } });
+              const orderData = await orderRes.json();
+              const cId = orderData?.data?.order?.customer?.id ?? null;
+              const orderCurrency = orderData?.data?.order?.currencyCode ?? currency;
+              if (cId) {
+                const creditRes = await admin.graphql(`#graphql
+                  mutation IssueDiffCredit($id: ID!, $creditInput: StoreCreditAccountCreditInput!) {
+                    storeCreditAccountCredit(id: $id, creditInput: $creditInput) {
+                      storeCreditAccountTransaction { id }
+                      userErrors { field message code }
+                    }
+                  }`, {
+                  variables: {
+                    id: cId,
+                    creditInput: {
+                      creditAmount: { amount: diffAbs.toFixed(2), currencyCode: orderCurrency },
+                    }
+                  }
+                });
+                const creditJson = await creditRes.json();
+                storeCreditTxId = creditJson?.data?.storeCreditAccountCredit?.storeCreditAccountTransaction?.id ?? storeCreditTxId;
+                storeCreditCode = `${formatMoney(diffAbs, orderCurrency)} store credit (exchange diff)`;
+                customerId = cId;
+              }
+            } catch (e) {
+              console.error('[exchange] diff store credit failed:', e);
+            }
+          }
+          // diffSettlement === 'NONE' → nothing to do
         }
       } catch (e: any) {
         return { error: `Failed to process exchange: ${e?.message || 'unknown error'}` };
@@ -412,6 +588,18 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       }
     });
 
+    // Close the corresponding Shopify Return so it leaves the "Retours en
+    // cours" list in the Admin. We use refundCreate (legacy path) which does
+    // NOT auto-close the return — only returnProcess does. Non-fatal on
+    // failure; the local state is already REFUNDED.
+    if (rr.shopifyReturnId) {
+      try {
+        await closeShopifyReturn(admin, rr.shopifyReturnId);
+      } catch (e) {
+        console.error('[returns.$rmaId] closeShopifyReturn after refund failed:', e);
+      }
+    }
+
     await prisma.returnEvent.create({
       data: {
         returnRequestId: rr.id,
@@ -421,7 +609,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           refundMethod === 'EXCHANGE' ? 'Exchange order created'
             : refundMethod === 'STORE_CREDIT' ? 'Store credit issued'
               : 'Refund issued',
-        detail: `$${refundAmount.toFixed(2)} · ${REFUND_TYPES[refundMethod]?.label ?? refundMethod}`,
+        detail: `${formatMoney(refundAmount, currency)} · ${REFUND_TYPES[refundMethod]?.label ?? refundMethod}`,
         meta: JSON.stringify({ refundId, storeCreditTxId, exchangeOrderId, exchangeOrderUrl }),
       }
     });
@@ -433,7 +621,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       customer_name: rr.customerName || rr.customerEmail.split('@')[0],
       rma_number: rr.rma,
       order_number: rr.orderName,
-      refund_amount: `$${refundAmount.toFixed(2)}`,
+      refund_amount: formatMoney(refundAmount, currency),
       store_credit_code: storeCreditCode || undefined,
       exchange_url: exchangeOrderUrl || undefined,
       refund_method: refundMethod,
@@ -460,7 +648,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 };
 
 export default function ReturnDetailPage() {
-  const { returnRequest, onboardingIncomplete, onboardingMissing } = useLoaderData<typeof loader>();
+  const { returnRequest, currency, onboardingIncomplete, onboardingMissing } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const location = useLocation();
   const toast = useToast();
@@ -476,14 +664,30 @@ export default function ReturnDetailPage() {
   const [overrideMethod, setOverrideMethod] = useState(false);
   const [refundMethod, setRefundMethod] = useState(r.refundType || 'ORIGINAL_PAYMENT');
   const [refundAmountStr, setRefundAmountStr] = useState((r.refundAmount || 0).toFixed(2));
+  // Exchange product picker — set when refundMethod === 'EXCHANGE'.
+  const [exchangeVariant, setExchangeVariant] = useState<PickedVariant | null>(null);
+  const [exchangeQty, setExchangeQty] = useState<number>(1);
+  // How to settle a price difference between the returned items and the
+  // replacement: customer pays via invoice / refund the diff / store credit.
+  const [diffSettlement, setDiffSettlement] = useState<
+    'INVOICE_DIFFERENCE' | 'REFUND_DIFFERENCE' | 'STORE_CREDIT_DIFFERENCE' | 'NONE'
+  >('INVOICE_DIFFERENCE');
 
   const [carrier, setCarrier] = useState('');
   const [trackingNumber, setTrackingNumber] = useState('');
   const [labelUrl, setLabelUrl] = useState('');
+  // If the merchant configured the shop to provide labels by default
+  // (Settings → Return shipping method), the Approve modal expands the prepaid
+  // label section by default. Otherwise it stays collapsed behind a toggle.
+  const shopProvidesLabels =
+    r.settings?.returnShippingMethod === 'merchant_provides_label';
+  const [providingLabel, setProvidingLabel] = useState(shopProvidesLabels);
 
-  // Ship modal state (when merchant manually marks as shipped)
-  const [shipCarrier, setShipCarrier] = useState('');
-  const [shipTracking, setShipTracking] = useState('');
+  // Ship modal state — pre-fill with customer-submitted tracking (from portal)
+  // when present, so the merchant only has to confirm. They can still edit.
+  const [shipCarrier, setShipCarrier] = useState(r.carrier ?? '');
+  const [shipTracking, setShipTracking] = useState(r.trackingNumber ?? '');
+  const customerSubmittedTracking = !!(r.carrier || r.trackingNumber);
 
   // Tracks which fetcher response we've already handled (so the same data
   // payload doesn't trigger duplicate toasts on re-render).
@@ -517,7 +721,7 @@ export default function ReturnDetailPage() {
     } else if (data.success && dataIntent === "process_refund") {
       setRefundOpen(false);
       const methodLabel = REFUND_TYPES[refundMethod as string]?.label || 'Refund';
-      toast({ kind: 'success', title: 'Refund issued', body: `${methodLabel} — $${parseFloat(refundAmountStr || '0').toFixed(2)} to ${r.customerName}.` });
+      toast({ kind: 'success', title: 'Refund issued', body: `${methodLabel} — ${formatMoney(parseFloat(refundAmountStr || '0'), currency)} to ${r.customerName}.` });
     } else if (data.error) {
       toast({ kind: 'error', title: 'Error', body: data.error });
     }
@@ -526,12 +730,28 @@ export default function ReturnDetailPage() {
   const itemsTotal = r.items.reduce((s: number, it: any) => s + it.price * it.quantity, 0);
   const restocking = 0;
   const refund = itemsTotal - restocking;
+  // Max refund available on the original payment. Phase B will fetch the real
+  // value from Shopify (`order.totalReceived - totalRefunded`); for now use
+  // the order total as a safe upper bound.
+  const maxRefundable = (r as any).maxRefundable ?? Math.max(itemsTotal, r.orderTotal);
+  const refundAmountNum = parseFloat(refundAmountStr || '0') || 0;
+  const refundExceedsMax =
+    refundMethod === 'ORIGINAL_PAYMENT' && refundAmountNum > maxRefundable + 0.001;
 
-  const isPending = r.status === 'PENDING';
-  const isApproved = r.status === 'APPROVED';
-  const isShipped = r.status === 'SHIPPED';
-  const isReceived = r.status === 'RECEIVED';
-  const isClosed = ['REFUNDED', 'REJECTED', 'EXPIRED'].includes(r.status);
+  // A refund/credit/exchange has already been issued if ANY of these are set.
+  // We check all of them (not just status) because the action handler updates
+  // them atomically — once any is present, the merchant should NOT see the
+  // "Issue refund" button again, even if the status hasn't refreshed yet.
+  const hasIssuedRefund = !!(
+    r.refundedAt || r.refundId || r.storeCreditTxId || r.exchangeOrderId
+  );
+
+  const isPending = r.status === 'PENDING' && !hasIssuedRefund;
+  const isApproved = r.status === 'APPROVED' && !hasIssuedRefund;
+  const isShipped = r.status === 'SHIPPED' && !hasIssuedRefund;
+  const isReceived = r.status === 'RECEIVED' && !hasIssuedRefund;
+  const isClosed =
+    hasIssuedRefund || ['REFUNDED', 'REJECTED', 'EXPIRED'].includes(r.status);
 
   const handleApprove = () => {
     fetcher.submit({
@@ -562,7 +782,18 @@ export default function ReturnDetailPage() {
     setRefundOpen(true);
   };
   const handleRefund = () => {
-    fetcher.submit({ intent: 'process_refund', refundMethod, refundAmount: refundAmountStr }, { method: 'POST' });
+    const payload: Record<string, string> = {
+      intent: 'process_refund',
+      refundMethod,
+      refundAmount: refundAmountStr,
+    };
+    if (refundMethod === 'EXCHANGE' && exchangeVariant) {
+      payload.exchangeVariantId = exchangeVariant.id;
+      payload.exchangeVariantPrice = exchangeVariant.price.toString();
+      payload.exchangeQty = exchangeQty.toString();
+      payload.diffSettlement = diffSettlement;
+    }
+    fetcher.submit(payload, { method: 'POST' });
   };
   const handleAddNote = () => {
     if (!internalNote.trim()) return;
@@ -621,7 +852,7 @@ export default function ReturnDetailPage() {
     const label = REFUND_TYPES[r.refundType as string]?.label ?? r.refundType;
     timeline.push({
       title: r.refundType === 'EXCHANGE' ? 'Exchange order created' : 'Refund issued',
-      detail: `${label} · $${r.refundAmount.toFixed(2)}`,
+      detail: `${label} · ${formatMoney(r.refundAmount, currency)}`,
       time: fallback(r.refundedAt),
       icon: r.refundType === 'EXCHANGE' ? 'RefreshCw' : 'DollarSign',
       color: '#22C55E',
@@ -642,6 +873,49 @@ export default function ReturnDetailPage() {
         </div>
         <div className="text-[13px] text-muted mt-1.5">Submitted {new Date(r.createdAt).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</div>
       </div>
+
+      {/* ── Shopify mirror status ─────────────────────────────────────────
+          Two cases:
+            (a) The order isn't fulfilled yet  → informational, auto-syncs via fulfillments/create webhook
+            (b) The mirror failed for another reason → show the actual error so the merchant knows
+      */}
+      {!r.shopifyReturnId && (() => {
+        const lastFail = (r.events || [])
+          .filter((e: any) => e.type === 'SHOPIFY_MIRROR_FAILED')
+          .slice(-1)[0];
+        // "Wait for fulfillment" only if the failure was genuinely about
+        // the order being unfulfilled. Any other error (access denied,
+        // network, mutation user errors) is a real bug to surface.
+        const isFulfillmentWait =
+          !lastFail ||
+          (lastFail.detail?.includes('no fulfilled items') &&
+            !lastFail.detail?.includes('Access denied') &&
+            !lastFail.detail?.includes('Forbidden'));
+        if (isFulfillmentWait) {
+          return (
+            <div className="mb-4 rounded-lg border border-[#3B82F6]/30 bg-[#3B82F6]/10 px-4 py-3 flex items-start gap-3">
+              <Icon name="Clock" size={16} className="mt-0.5 shrink-0" style={{ color: '#3B82F6' }} />
+              <div className="flex-1 min-w-0">
+                <div className="text-[13px] font-semibold text-ink">Waiting for order fulfillment</div>
+                <div className="text-[12px] text-muted mt-0.5 leading-relaxed">
+                  This return will appear in your Shopify Admin automatically as soon as the order's items are fulfilled and shipped.
+                </div>
+              </div>
+            </div>
+          );
+        }
+        return (
+          <div className="mb-4 rounded-lg border border-[#EF4444]/30 bg-[#EF4444]/10 px-4 py-3 flex items-start gap-3">
+            <Icon name="AlertTriangle" size={16} className="mt-0.5 shrink-0" style={{ color: '#EF4444' }} />
+            <div className="flex-1 min-w-0">
+              <div className="text-[13px] font-semibold text-ink">Couldn't sync to Shopify Admin</div>
+              <div className="text-[12px] text-muted mt-0.5 leading-relaxed break-words">
+                {lastFail.detail || 'Unknown error — check the server logs for [returns-api] entries.'}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         {/* LEFT */}
@@ -831,10 +1105,10 @@ export default function ReturnDetailPage() {
           {/* Refund preview */}
           <Card title="Refund Preview">
             <div className="space-y-2 text-[13px]">
-              <Row label="Items total" value={`$${itemsTotal.toFixed(2)}`} />
-              <Row label="Restocking fee" value={`-$${restocking.toFixed(2)}`} muted />
+              <Row label="Items total" value={formatMoney(itemsTotal, currency)} />
+              <Row label="Restocking fee" value={`- ${formatMoney(restocking, currency)}`} muted />
               <div className="border-t border-divider my-2"></div>
-              <Row label="Estimated refund" value={`$${refund.toFixed(2)}`} strong />
+              <Row label="Estimated refund" value={formatMoney(refund, currency)} strong />
               <div className="flex items-center justify-between pt-1.5">
                 <span className="text-[12px] text-muted">Customer requested</span>
                 {(() => {
@@ -878,7 +1152,7 @@ export default function ReturnDetailPage() {
           <Card title="Shipping Info">
             <div className="space-y-2.5 text-[13px]">
               <Row label="Order" value={<a className="text-accent2 hover:text-white cursor-pointer">{r.orderName}</a>} />
-              <Row label="Total" value={`$${r.orderTotal.toFixed(2)}`} />
+              <Row label="Total" value={formatMoney(r.orderTotal, currency)} />
               {r.carrier && <Row label="Carrier" value={r.carrier} />}
               {r.trackingNumber && <Row label="Tracking" value={r.trackingNumber} />}
               {r.shippedAt && <Row label="Shipped" value={new Date(r.shippedAt).toLocaleDateString()} />}
@@ -916,18 +1190,33 @@ export default function ReturnDetailPage() {
         </>}>
         <div className="space-y-4">
           <div className="text-[13px] text-muted leading-relaxed">
-            The customer will be emailed shipping instructions. Optionally provide a prepaid label below.
+            {shopProvidesLabels
+              ? 'Your shop is configured to provide return labels — attach the prepaid label info below before approving.'
+              : 'The customer will be emailed shipping instructions. They will ship at their own cost and submit their tracking number via your portal once shipped.'}
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <CarrierField value={carrier} onChange={setCarrier} />
-            <div>
-              <label className="text-[12px] font-medium text-muted block mb-1.5">Tracking Number</label>
-              <Input value={trackingNumber} onChange={(e: any) => setTrackingNumber(e.target.value)} placeholder="e.g. 1Z999..." />
-            </div>
-          </div>
-          <div>
-            <label className="text-[12px] font-medium text-muted block mb-1.5">Prepaid Shipping Label URL <span className="text-faint font-normal">(optional)</span></label>
-            <Input value={labelUrl} onChange={(e: any) => setLabelUrl(e.target.value)} placeholder="https://..." />
+
+          <div className="p-3 rounded-md bg-bg/40 border border-divider">
+            <Toggle
+              checked={providingLabel}
+              onChange={setProvidingLabel}
+              label="I'm providing a prepaid return label"
+              description="Only enable this if you're attaching a return label for the customer (e.g. from Shippo, EasyPost)."
+            />
+            {providingLabel && (
+              <div className="mt-3 pl-12 space-y-3 animate-fadeIn">
+                <div className="grid grid-cols-2 gap-3">
+                  <CarrierField value={carrier} onChange={setCarrier} />
+                  <div>
+                    <label className="text-[12px] font-medium text-muted block mb-1.5">Tracking Number</label>
+                    <Input value={trackingNumber} onChange={(e: any) => setTrackingNumber(e.target.value)} placeholder="e.g. 1Z999..." />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[12px] font-medium text-muted block mb-1.5">Prepaid Shipping Label URL</label>
+                  <Input value={labelUrl} onChange={(e: any) => setLabelUrl(e.target.value)} placeholder="https://..." />
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </Modal>
@@ -953,9 +1242,19 @@ export default function ReturnDetailPage() {
           <Btn variant="primary" icon="Truck" onClick={handleMarkShipped} disabled={fetcher.state !== 'idle'}>Confirm Shipped</Btn>
         </>}>
         <div className="space-y-4">
-          <div className="text-[13px] text-muted leading-relaxed">
-            Confirm that the customer has shipped the items back. Add tracking info if available.
-          </div>
+          {customerSubmittedTracking ? (
+            <div className="rounded-md border border-[#22C55E]/30 bg-[#22C55E]/10 px-3 py-2.5 flex items-start gap-2">
+              <Icon name="CheckCircle2" size={14} className="mt-0.5 shrink-0" style={{ color: '#22C55E' }} />
+              <div className="text-[12.5px] text-ink leading-relaxed">
+                <span className="font-semibold">Customer submitted tracking via the portal.</span>{' '}
+                <span className="text-muted">You can edit before confirming.</span>
+              </div>
+            </div>
+          ) : (
+            <div className="text-[13px] text-muted leading-relaxed">
+              Confirm that the customer has shipped the items back. Add tracking info if available.
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <CarrierField value={shipCarrier} onChange={setShipCarrier} />
             <div>
@@ -971,12 +1270,28 @@ export default function ReturnDetailPage() {
         title={r.refundType === 'EXCHANGE' ? 'Process Exchange' : 'Process Refund'} width="max-w-lg"
         footer={<>
           <Btn variant="ghost" onClick={() => setRefundOpen(false)}>Cancel</Btn>
-          <Btn variant="primary" icon={r.refundType === 'EXCHANGE' ? 'RefreshCw' : 'DollarSign'} onClick={handleRefund} disabled={fetcher.state !== 'idle'}>
+          <Btn variant="primary" icon={r.refundType === 'EXCHANGE' ? 'RefreshCw' : 'DollarSign'}
+            onClick={handleRefund}
+            disabled={
+              fetcher.state !== 'idle' ||
+              refundExceedsMax ||
+              refundAmountNum <= 0 ||
+              (refundMethod === 'EXCHANGE' && !exchangeVariant)
+            }>
             {refundMethod === 'EXCHANGE' ? 'Create Exchange Order' : 'Confirm Refund'}
           </Btn>
         </>}>
         {(() => {
           const requested = REFUND_TYPES[r.refundType as string] || REFUND_TYPES['ORIGINAL_PAYMENT'];
+          const method = REFUND_TYPES[refundMethod as string] || REFUND_TYPES['ORIGINAL_PAYMENT'];
+          const bonusPct = r.settings?.storeCreditBonusPercent ?? 0;
+          const bonusActive =
+            refundMethod === 'STORE_CREDIT' &&
+            r.settings?.incentivizeStoreCredit &&
+            bonusPct > 0;
+          const bonusAmount = bonusActive ? refundAmountNum * (bonusPct / 100) : 0;
+          const totalStoreCredit = refundAmountNum + bonusAmount;
+
           return (
             <div className="space-y-4">
               {onboardingIncomplete && (
@@ -993,68 +1308,260 @@ export default function ReturnDetailPage() {
                   </div>
                 </Link>
               )}
-              <div>
-                <div className="text-[11px] uppercase tracking-wider text-faint font-semibold mb-1.5">Customer requested</div>
-                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md"
-                  style={{ background: requested.bg, color: requested.color }}>
-                  <Icon name={requested.icon} size={14} />
-                  <span className="text-[13px] font-semibold">{requested.label}</span>
+
+              {/* ── SUMMARY ──────────────────────────────────────────────── */}
+              <div className="rounded-md border border-divider bg-bg/30 p-3.5">
+                <div className="text-[10.5px] uppercase tracking-wider text-faint font-semibold mb-2">Summary</div>
+                <div className="space-y-1.5 text-[13px]">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted">Items total ({r.items.length})</span>
+                    <span className="text-ink tabular-nums">{formatMoney(itemsTotal, currency)}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted">Restocking fee</span>
+                    <span className="text-muted tabular-nums">{restocking > 0 ? `- ${formatMoney(restocking, currency)}` : '—'}</span>
+                  </div>
+                  <div className="pt-1.5 mt-1.5 border-t border-divider flex items-center justify-between text-[13.5px]">
+                    <span className="font-semibold text-ink">Total refund</span>
+                    <span className="font-bold text-ink tabular-nums">{formatMoney(refund, currency)}</span>
+                  </div>
                 </div>
               </div>
 
-              <div className="p-3 rounded-md bg-bg/40 border border-divider">
-                <Toggle checked={overrideMethod} onChange={(v: boolean) => { setOverrideMethod(v); if (!v) setRefundMethod(r.refundType || 'ORIGINAL_PAYMENT'); }}
-                  label="Override refund method"
-                  description="Issue a different refund type than the customer requested." />
-                {overrideMethod && (
-                  <div className="mt-3 grid grid-cols-3 gap-2 animate-fadeIn">
-                    {['ORIGINAL_PAYMENT', 'STORE_CREDIT', 'EXCHANGE'].map(key => {
-                      const m = REFUND_TYPES[key];
-                      const sel = refundMethod === key;
-                      return (
-                        <button key={key} onClick={() => setRefundMethod(key)}
-                          className={`text-left p-2.5 rounded-md border-2 transition ${sel ? 'border-accent bg-accent/10' : 'border-divider hover:border-[#3a3e58]'}`}>
-                          <Icon name={m.icon} size={14} style={{ color: m.color }} />
-                          <div className="text-[12px] font-semibold text-ink mt-1.5">{m.label}</div>
-                        </button>
-                      );
-                    })}
+              {/* ── REFUND METHOD ────────────────────────────────────────── */}
+              <div>
+                <div className="text-[10.5px] uppercase tracking-wider text-faint font-semibold mb-1.5">Refund method</div>
+                <div className="flex items-center gap-2 px-3 py-2 rounded-md"
+                  style={{ background: method.bg, color: method.color }}>
+                  <Icon name={method.icon} size={14} />
+                  <span className="text-[13px] font-semibold">{method.label}</span>
+                  {refundMethod === r.refundType && (
+                    <span className="ml-auto text-[10.5px] uppercase tracking-wider opacity-80">Customer choice</span>
+                  )}
+                </div>
+                {refundMethod === 'ORIGINAL_PAYMENT' && (
+                  <div className="text-[11.5px] text-muted mt-1.5 flex items-center gap-1.5">
+                    <Icon name="Info" size={11} />
+                    <span>{formatMoney(maxRefundable, currency)} available for refund</span>
                   </div>
                 )}
               </div>
 
+              {/* ── AMOUNT ──────────────────────────────────────────────── */}
               <div>
-                <label className="text-[11px] uppercase tracking-wider text-faint font-semibold block mb-1.5">Refund amount</label>
+                <label className="text-[10.5px] uppercase tracking-wider text-faint font-semibold block mb-1.5">
+                  {refundMethod === 'STORE_CREDIT' ? 'Credit amount' :
+                    refundMethod === 'EXCHANGE' ? 'Exchange credit value' :
+                      'Refund amount'}
+                </label>
                 <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted text-[14px]">$</span>
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted text-[14px] tabular-nums">{currencySymbol(currency)}</span>
                   <input value={refundAmountStr} onChange={e => setRefundAmountStr(e.target.value)}
-                    className="w-full h-10 pl-7 pr-3 text-[15px] rounded-md bg-bg border border-border text-ink font-semibold tabular-nums focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20" />
+                    className={`w-full h-10 pl-12 pr-3 text-[15px] rounded-md bg-bg border ${refundExceedsMax ? 'border-danger ring-2 ring-danger/20' : 'border-border focus:border-accent focus:ring-2 focus:ring-accent/20'} text-ink font-semibold tabular-nums focus:outline-none`} />
                 </div>
+                {refundExceedsMax && (
+                  <div className="text-[11.5px] text-danger mt-1.5 flex items-center gap-1.5">
+                    <Icon name="TriangleAlert" size={11} />
+                    Amount exceeds the {formatMoney(maxRefundable, currency)} available on the original payment.
+                  </div>
+                )}
               </div>
 
-              {refundMethod === 'STORE_CREDIT' && (
-                <div className="p-3 rounded-md text-[12.5px] flex gap-2 items-start"
-                  style={{ background: 'rgba(108,99,255,0.10)', color: '#8B85FF' }}>
-                  <Icon name="Info" size={14} className="mt-0.5 shrink-0" />
-                  <div className="leading-relaxed">A Shopify gift card will be issued to the customer via <code>refundCreate</code> and sent by email.</div>
-                </div>
-              )}
-              {refundMethod === 'EXCHANGE' && (
-                <div className="space-y-3">
-                  {(r as any).exchangeNote && (
-                    <div className="p-3 rounded-md border text-[12.5px]"
-                      style={{ background: 'rgba(59,130,246,0.06)', borderColor: 'rgba(59,130,246,0.2)', color: '#3B82F6' }}>
-                      <div className="font-semibold mb-1 flex items-center gap-1.5"><Icon name="MessageSquare" size={12} /> Customer requested:</div>
-                      <div className="text-ink italic">"{(r as any).exchangeNote}"</div>
-                    </div>
-                  )}
-                  <div className="p-3 rounded-md text-[12.5px] flex gap-2 items-start"
-                    style={{ background: 'rgba(59,130,246,0.08)', color: '#3B82F6' }}>
-                    <Icon name="Info" size={14} className="mt-0.5 shrink-0" />
-                    <div className="leading-relaxed">A Shopify draft order will be created with the return value applied as a discount credit. You can then edit it in Shopify admin to add the exact replacement item before completing it.</div>
+              {/* ── METHOD-SPECIFIC PREVIEW ─────────────────────────────── */}
+              {refundMethod === 'STORE_CREDIT' && bonusActive && (
+                <div className="p-3 rounded-md text-[12.5px] flex items-start gap-2.5"
+                  style={{ background: 'rgba(139,133,255,0.10)', color: '#8B85FF' }}>
+                  <Icon name="Sparkles" size={14} className="mt-0.5 shrink-0" />
+                  <div className="leading-relaxed text-ink">
+                    With <strong>+{bonusPct}% bonus</strong>, customer will receive{' '}
+                    <strong className="tabular-nums">{formatMoney(totalStoreCredit, currency)}</strong> in store credit (+{formatMoney(bonusAmount, currency)} bonus).
                   </div>
                 </div>
               )}
+              {refundMethod === 'STORE_CREDIT' && !bonusActive && (
+                <div className="p-3 rounded-md text-[12.5px] flex items-start gap-2.5"
+                  style={{ background: 'rgba(139,133,255,0.08)', color: '#8B85FF' }}>
+                  <Icon name="Info" size={14} className="mt-0.5 shrink-0" />
+                  <div className="leading-relaxed text-ink">
+                    A store credit balance of <strong className="tabular-nums">{formatMoney(refundAmountNum, currency)}</strong> will be issued to <strong>{r.customerEmail}</strong>'s Shopify customer account.
+                  </div>
+                </div>
+              )}
+              {refundMethod === 'EXCHANGE' && (() => {
+                const replacementUnit = exchangeVariant?.price ?? 0;
+                const replacementTotal = replacementUnit * exchangeQty;
+                const returnedCredit = itemsTotal;
+                const diff = replacementTotal - returnedCredit;
+                return (
+                  <div className="space-y-3">
+                    {(r as any).exchangeNote && (
+                      <div className="p-3 rounded-md border text-[12.5px]"
+                        style={{ background: 'rgba(59,130,246,0.06)', borderColor: 'rgba(59,130,246,0.2)' }}>
+                        <div className="font-semibold mb-1 flex items-center gap-1.5" style={{ color: '#3B82F6' }}>
+                          <Icon name="MessageSquare" size={12} /> Customer requested:
+                        </div>
+                        <div className="text-ink italic">&ldquo;{(r as any).exchangeNote}&rdquo;</div>
+                      </div>
+                    )}
+
+                    {/* Product picker */}
+                    <div>
+                      <label className="text-[10.5px] uppercase tracking-wider text-faint font-semibold block mb-1.5">
+                        Replacement item
+                      </label>
+                      <ProductPicker
+                        value={exchangeVariant}
+                        onChange={setExchangeVariant}
+                        currency={currency}
+                      />
+                    </div>
+
+                    {exchangeVariant && (
+                      <>
+                        {/* Quantity */}
+                        <div className="flex items-center gap-3">
+                          <label className="text-[12.5px] text-muted shrink-0">Quantity</label>
+                          <div className="flex items-center gap-1">
+                            <button type="button"
+                              onClick={() => setExchangeQty(q => Math.max(1, q - 1))}
+                              className="w-7 h-7 rounded border border-border text-ink hover:bg-bg/40 transition">
+                              <Icon name="Minus" size={11} />
+                            </button>
+                            <input type="number" min={1} value={exchangeQty}
+                              onChange={(e) => setExchangeQty(Math.max(1, parseInt(e.target.value || '1', 10) || 1))}
+                              className="w-12 h-7 px-2 text-[13px] rounded-md bg-bg border border-border text-ink text-center tabular-nums focus:outline-none focus:border-accent" />
+                            <button type="button"
+                              onClick={() => setExchangeQty(q => q + 1)}
+                              className="w-7 h-7 rounded border border-border text-ink hover:bg-bg/40 transition">
+                              <Icon name="Plus" size={11} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Price difference breakdown */}
+                        <div className="rounded-md border border-divider bg-bg/30 p-3 space-y-1.5 text-[13px]">
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted">Replacement ({exchangeQty}×)</span>
+                            <span className="text-ink tabular-nums">{formatMoney(replacementTotal, currency)}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted">Returned credit</span>
+                            <span className="text-muted tabular-nums">- {formatMoney(returnedCredit, currency)}</span>
+                          </div>
+                          <div className="pt-1.5 mt-1.5 border-t border-divider flex items-center justify-between text-[13.5px] font-semibold">
+                            {diff > 0.001 ? (
+                              <>
+                                <span className="text-ink">Customer owes</span>
+                                <span className="text-[#F59E0B] tabular-nums">{formatMoney(diff, currency)}</span>
+                              </>
+                            ) : diff < -0.001 ? (
+                              <>
+                                <span className="text-ink">To refund customer</span>
+                                <span className="text-[#22C55E] tabular-nums">{formatMoney(-diff, currency)}</span>
+                              </>
+                            ) : (
+                              <>
+                                <span className="text-ink">Even exchange</span>
+                                <span className="text-muted">—</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Settlement choice — only when there's a difference */}
+                        {diff > 0.001 && (
+                          <div className="rounded-md border border-divider p-3 space-y-2">
+                            <div className="text-[12.5px] text-ink font-semibold">How should the difference be settled?</div>
+                            <label className="flex items-start gap-2 cursor-pointer">
+                              <input type="radio" checked={diffSettlement === 'INVOICE_DIFFERENCE'}
+                                onChange={() => setDiffSettlement('INVOICE_DIFFERENCE')}
+                                className="mt-0.5" />
+                              <div className="text-[12.5px]">
+                                <div className="text-ink">Customer pays the difference</div>
+                                <div className="text-[11.5px] text-muted">A draft order is invoiced for {formatMoney(diff, currency)}. Customer completes checkout to receive the item.</div>
+                              </div>
+                            </label>
+                          </div>
+                        )}
+                        {diff < -0.001 && r.settings?.allowStoreCredit && (
+                          <div className="rounded-md border border-divider p-3 space-y-2">
+                            <div className="text-[12.5px] text-ink font-semibold">How should the difference be settled?</div>
+                            <label className="flex items-start gap-2 cursor-pointer">
+                              <input type="radio" checked={diffSettlement === 'REFUND_DIFFERENCE'}
+                                onChange={() => setDiffSettlement('REFUND_DIFFERENCE')}
+                                className="mt-0.5" />
+                              <div className="text-[12.5px]">
+                                <div className="text-ink">Refund difference to original payment</div>
+                                <div className="text-[11.5px] text-muted">Customer receives {formatMoney(-diff, currency)} back via {currencySymbol(currency)} on their card.</div>
+                              </div>
+                            </label>
+                            <label className="flex items-start gap-2 cursor-pointer">
+                              <input type="radio" checked={diffSettlement === 'STORE_CREDIT_DIFFERENCE'}
+                                onChange={() => setDiffSettlement('STORE_CREDIT_DIFFERENCE')}
+                                className="mt-0.5" />
+                              <div className="text-[12.5px]">
+                                <div className="text-ink">Issue difference as store credit</div>
+                                <div className="text-[11.5px] text-muted">Customer keeps {formatMoney(-diff, currency)} as store credit for future purchases.</div>
+                              </div>
+                            </label>
+                            <label className="flex items-start gap-2 cursor-pointer">
+                              <input type="radio" checked={diffSettlement === 'NONE'}
+                                onChange={() => setDiffSettlement('NONE')}
+                                className="mt-0.5" />
+                              <div className="text-[12.5px]">
+                                <div className="text-ink">No settlement</div>
+                                <div className="text-[11.5px] text-muted">Customer agreed to no refund of the difference.</div>
+                              </div>
+                            </label>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {!exchangeVariant && (
+                      <div className="p-3 rounded-md text-[12.5px] flex items-start gap-2.5"
+                        style={{ background: 'rgba(59,130,246,0.08)', color: '#3B82F6' }}>
+                        <Icon name="Info" size={14} className="mt-0.5 shrink-0" />
+                        <div className="leading-relaxed text-ink">
+                          Pick the replacement item from your catalog. A draft order will be sent to <strong>{r.customerEmail}</strong> with this product, the returned items applied as credit, and any price difference invoiced or refunded.
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* ── ADVANCED: override method ───────────────────────────── */}
+              <details className="group">
+                <summary className="text-[11.5px] text-muted hover:text-ink cursor-pointer select-none flex items-center gap-1.5 transition-colors">
+                  <Icon name="ChevronRight" size={11} className="transition-transform group-open:rotate-90" />
+                  Advanced: change refund method
+                </summary>
+                <div className="mt-3 p-3 rounded-md bg-bg/40 border border-divider">
+                  <div className="text-[11.5px] text-muted leading-relaxed mb-2">
+                    Customer originally requested <strong className="text-ink">{requested.label}</strong>. Only override if you have agreed otherwise.
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(['ORIGINAL_PAYMENT', 'STORE_CREDIT', 'EXCHANGE'] as const)
+                      .filter(key => {
+                        if (key === 'STORE_CREDIT') return !!r.settings?.allowStoreCredit;
+                        if (key === 'EXCHANGE') return !!r.settings?.allowExchanges;
+                        return true;
+                      })
+                      .map(key => {
+                        const m = REFUND_TYPES[key];
+                        const sel = refundMethod === key;
+                        return (
+                          <button key={key} onClick={() => { setOverrideMethod(true); setRefundMethod(key); }}
+                            className={`text-left p-2.5 rounded-md border-2 transition ${sel ? 'border-accent bg-accent/10' : 'border-divider hover:border-[#3a3e58]'}`}>
+                            <Icon name={m.icon} size={14} style={{ color: m.color }} />
+                            <div className="text-[12px] font-semibold text-ink mt-1.5">{m.label}</div>
+                          </button>
+                        );
+                      })}
+                  </div>
+                </div>
+              </details>
             </div>
           );
         })()}

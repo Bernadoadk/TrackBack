@@ -43,7 +43,9 @@
       "Bash(ls \"C:/Users/Bernado ADIKPETO/Desktop/Victim_projects/badge-xpress/\" 2>/dev/null | grep -E \"toml|json\" | head -20)",
       "mcp__shopify-dev-mcp__learn_shopify_api",
       "mcp__shopify-dev-mcp__search_docs_chunks",
-      "Bash(npx eslint *)"
+      "Bash(npx eslint *)",
+      "Bash(ls \"C:\\\\Users\\\\Bernado ADIKPETO\\\\Desktop\\\\Victim_projects\\\\all-signs-options-shopify\" \"C:\\\\Users\\\\Bernado ADIKPETO\\\\Desktop\\\\Victim_projects\\\\badge-xpress\")",
+      "mcp__shopify-dev-mcp__validate_graphql_codeblocks"
     ]
   }
 }

@@ -20,6 +20,26 @@ api_version = "2026-07"
   topics = [ "shop/update" ]
   uri = "/webhooks/shop/update"
 
+  # ── Shopify native Returns sync ────────────────────────────────────────
+  [[webhooks.subscriptions]]
+  topics = [
+    "returns/request",
+    "returns/approve",
+    "returns/decline",
+    "returns/cancel",
+    "returns/close",
+    "returns/reopen",
+    "returns/update",
+    "returns/process",
+    "refunds/create"
+  ]
+  uri = "/webhooks/returns"
+
+  # Retry portal-submitted returns once their order gets fulfilled.
+  [[webhooks.subscriptions]]
+  topics = [ "fulfillments/create" ]
+  uri = "/webhooks/fulfillments/create"
+
   # ── Mandatory GDPR compliance webhooks ─────────────────────────────────
   [webhooks.privacy_compliance]
   customer_data_request_url = "/webhooks/customers/data_request"
@@ -28,7 +48,7 @@ api_version = "2026-07"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_customers,read_orders,read_products,write_gift_cards,write_orders,write_products,read_returns,write_returns,read_store_credit_accounts,read_store_credit_account_transactions,write_store_credit_account_transactions,write_draft_orders,read_draft_orders"
+scopes = "read_assigned_fulfillment_orders,read_customers,read_fulfillments,read_merchant_managed_fulfillment_orders,read_orders,read_products,write_gift_cards,write_orders,write_products,read_returns,write_returns,read_store_credit_accounts,read_store_credit_account_transactions,write_store_credit_account_transactions,write_draft_orders,read_draft_orders"
 
 [auth]
 redirect_urls = [

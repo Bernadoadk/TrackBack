@@ -7,6 +7,13 @@ import { PageHeader, Btn, Icon, Toggle, Input, Textarea, Select, useToast } from
 import { DEFAULT_REASONS } from "../components/mock-data";
 import { getShopPlan, planAtLeast, syncBillingFromShopify } from "../lib/plan.server";
 
+function planAllowsStoreCredit(plan: string): boolean {
+  return plan === 'starter' || plan === 'starter_annual' || plan === 'pro' || plan === 'pro_annual';
+}
+function planAllowsExchange(plan: string): boolean {
+  return plan === 'pro' || plan === 'pro_annual';
+}
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
   const shop = session.shop;
@@ -34,7 +41,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // which also handles its own seeding — no need to load them here.
   const plan = await syncBillingFromShopify(admin, shop);
 
-  return { settings, shop, appUrl, plan };
+  // Theme app extension deep links use the app's client_id (SHOPIFY_API_KEY)
+  // as the identifier — Shopify resolves blocks by {api_client_id}/{block_handle}.
+  const apiKey = process.env.SHOPIFY_API_KEY ?? "";
+
+  return { settings, shop, appUrl, plan, apiKey };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -44,18 +55,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const intent = formData.get("intent");
 
   if (intent === "save_general") {
+    // Server-side plan gating — never let a client bypass the toggles by
+    // crafting a request directly. Lower-tier merchants get forced false.
+    const plan = await getShopPlan(shop);
+    const reqStoreCredit = formData.get("allowStoreCredit") === "true";
+    const reqExchanges = formData.get("allowExchanges") === "true";
+    const reqShippingMethod = formData.get("returnShippingMethod") as string;
+    const validShippingMethods = ["customer_pays", "merchant_provides_label"];
     await prisma.shopSettings.update({
       where: { shop },
       data: {
         returnWindow: Number(formData.get("returnWindow")),
+        returnShippingMethod: validShippingMethods.includes(reqShippingMethod)
+          ? reqShippingMethod
+          : "customer_pays",
         returnAddress: formData.get("returnAddress") as string,
         autoApprove: formData.get("autoApprove") === "true",
         autoExpireDays: Number(formData.get("autoExpireDays")) || 7,
         blockedSkus: formData.get("blockedSkus") as string || "",
         notifyMerchant: formData.get("notifyMerchant") === "true",
         fromEmail: formData.get("fromEmail") as string,
-        allowStoreCredit: formData.get("allowStoreCredit") === "true",
-        allowExchanges: formData.get("allowExchanges") === "true",
+        allowStoreCredit: planAllowsStoreCredit(plan) ? reqStoreCredit : false,
+        allowExchanges: planAllowsExchange(plan) ? reqExchanges : false,
         storeCreditBonusPercent: Number(formData.get("storeCreditBonusPercent")),
         incentivizeStoreCredit: formData.get("incentivizeStoreCredit") === "true"
       }
@@ -85,7 +106,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function SettingsPage() {
-  const { settings, shop, appUrl, plan } = useLoaderData<typeof loader>();
+  const { settings, shop, appUrl, plan, apiKey } = useLoaderData<typeof loader>();
 
   const tabs = [
     { key: 'General', icon: 'Settings2' },
@@ -125,10 +146,10 @@ export default function SettingsPage() {
         })}
       </div>
 
-      {tab === 'General' && <GeneralTab settings={settings} />}
+      {tab === 'General' && <GeneralTab settings={settings} plan={plan} />}
       {tab === 'Reasons' && <ReasonsTab settings={settings} plan={plan} />}
       {tab === 'Policy' && <PolicyTab settings={settings} />}
-      {tab === 'Portal' && <PortalAccessTab shop={shop} appUrl={appUrl} />}
+      {tab === 'Portal' && <PortalAccessTab shop={shop} appUrl={appUrl} apiKey={apiKey} />}
     </div>
   );
 }
@@ -157,7 +178,12 @@ function SaveBar({ onSave, onDiscard, isSaving, disabled }: any) {
 }
 
 // ---- General tab ----
-function GeneralTab({ settings }: any) {
+function GeneralTab({ settings, plan }: any) {
+  // Plan tiers — store credit needs Starter+, exchanges need Pro.
+  const canStoreCredit = plan === 'starter' || plan === 'starter_annual' || plan === 'pro' || plan === 'pro_annual';
+  const canExchange = plan === 'pro' || plan === 'pro_annual';
+  const location = useLocation();
+  const billingHref = `/app/billing${location.search}`;
   const submit = useSubmit();
   const navigation = useNavigation();
   const toast = useToast();
@@ -165,6 +191,9 @@ function GeneralTab({ settings }: any) {
   const actionData = useActionData<typeof action>();
 
   const [returnWindow, setReturnWindow] = useState(settings.returnWindow);
+  const [shippingMethod, setShippingMethod] = useState<string>(
+    settings.returnShippingMethod ?? "customer_pays",
+  );
   const [address, setAddress] = useState(settings.returnAddress);
   const [autoApprove, setAutoApprove] = useState(settings.autoApprove);
   const [autoExpireDays, setAutoExpireDays] = useState(settings.autoExpireDays ?? 7);
@@ -186,6 +215,7 @@ function GeneralTab({ settings }: any) {
     const formData = new FormData();
     formData.append("intent", "save_general");
     formData.append("returnWindow", returnWindow.toString());
+    formData.append("returnShippingMethod", shippingMethod);
     formData.append("returnAddress", address);
     formData.append("autoApprove", autoApprove.toString());
     formData.append("autoExpireDays", autoExpireDays.toString());
@@ -202,6 +232,51 @@ function GeneralTab({ settings }: any) {
 
   return (
     <div className="bg-surface border border-border rounded-lg px-6">
+      <SettingRow label="Return shipping method" hint="Who pays for the customer's return shipment. Controls how the return flow is presented in the customer portal and the admin approve modal.">
+        <div className="space-y-2">
+          {[
+            {
+              value: 'customer_pays',
+              title: 'Customer pays for return shipping',
+              desc: 'Customer ships back at their own cost and submits tracking via your portal.',
+              icon: 'User',
+              color: '#3B82F6',
+            },
+            {
+              value: 'merchant_provides_label',
+              title: 'I provide a prepaid return label',
+              desc: 'You attach a prepaid label when approving. Customer just drops off the package.',
+              icon: 'Tag',
+              color: '#22C55E',
+            },
+          ].map((opt) => {
+            const sel = shippingMethod === opt.value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setShippingMethod(opt.value)}
+                className={`w-full text-left p-3 rounded-md border-2 transition flex items-start gap-3 ${
+                  sel ? 'border-accent bg-accent/[0.06]' : 'border-divider hover:border-[#3a3e58]'
+                }`}
+              >
+                <div
+                  className="w-8 h-8 rounded-md grid place-content-center shrink-0"
+                  style={{ background: `${opt.color}1f`, color: opt.color }}
+                >
+                  <Icon name={opt.icon} size={15} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[13px] font-semibold text-ink">{opt.title}</div>
+                  <div className="text-[11.5px] text-muted mt-0.5 leading-relaxed">{opt.desc}</div>
+                </div>
+                {sel && <Icon name="Check" size={15} className="text-accent2 shrink-0 mt-1" strokeWidth={2.5} />}
+              </button>
+            );
+          })}
+        </div>
+      </SettingRow>
+
       <SettingRow label="Return window" hint="How many days after delivery customers can request a return.">
         <div className="flex items-center gap-2">
           <input type="number" value={returnWindow} onChange={e => setReturnWindow(+e.target.value)}
@@ -263,12 +338,34 @@ function GeneralTab({ settings }: any) {
         </div>
 
         <div className="space-y-4 ml-0 md:ml-12">
-          {/* Store credit */}
+          {/* Store credit — Starter+ feature */}
           <div className="p-4 rounded-md bg-bg/40 border border-divider">
-            <Toggle checked={allowStoreCredit} onChange={setAllowStoreCredit}
-              label="Allow Store Credit refunds"
-              description="Let customers choose store credit — issued instantly, retains revenue." />
-            {allowStoreCredit && (
+            <div className="flex items-start justify-between gap-3">
+              <Toggle
+                checked={canStoreCredit && allowStoreCredit}
+                onChange={(v: boolean) => canStoreCredit && setAllowStoreCredit(v)}
+                label={
+                  <span className="flex items-center gap-2">
+                    Allow Store Credit refunds
+                    {!canStoreCredit && (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide rounded"
+                        style={{ background: 'rgba(139,92,246,0.15)', color: '#8B5CF6' }}>
+                        <Icon name="Lock" size={9} /> Starter
+                      </span>
+                    )}
+                  </span>
+                }
+                description="Let customers choose store credit — issued instantly, retains revenue."
+                disabled={!canStoreCredit} />
+              {!canStoreCredit && (
+                <Link to={billingHref}
+                  className="shrink-0 h-7 px-3 rounded-md text-[11.5px] font-semibold text-white flex items-center gap-1"
+                  style={{ background: '#8B5CF6' }}>
+                  Upgrade <Icon name="ArrowRight" size={11} />
+                </Link>
+              )}
+            </div>
+            {canStoreCredit && allowStoreCredit && (
               <div className="mt-3 pl-12 space-y-3 animate-fadeIn">
                 <div className="flex items-center gap-3 flex-wrap">
                   <label className="text-[12.5px] text-muted shrink-0">Store credit bonus</label>
@@ -297,12 +394,34 @@ function GeneralTab({ settings }: any) {
             )}
           </div>
 
-          {/* Exchanges */}
+          {/* Exchanges — Pro-only feature */}
           <div className="p-4 rounded-md bg-bg/40 border border-divider">
-            <Toggle checked={allowExchanges} onChange={setAllowExchanges}
-              label="Allow Exchanges"
-              description="Let customers swap an item for another size, color, or product." />
-            {allowExchanges && (
+            <div className="flex items-start justify-between gap-3">
+              <Toggle
+                checked={canExchange && allowExchanges}
+                onChange={(v: boolean) => canExchange && setAllowExchanges(v)}
+                label={
+                  <span className="flex items-center gap-2">
+                    Allow Exchanges
+                    {!canExchange && (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide rounded"
+                        style={{ background: 'rgba(245,158,11,0.18)', color: '#F59E0B' }}>
+                        <Icon name="Lock" size={9} /> Pro
+                      </span>
+                    )}
+                  </span>
+                }
+                description="Let customers swap an item for another size, color, or product."
+                disabled={!canExchange} />
+              {!canExchange && (
+                <Link to={billingHref}
+                  className="shrink-0 h-7 px-3 rounded-md text-[11.5px] font-semibold text-white flex items-center gap-1"
+                  style={{ background: '#F59E0B' }}>
+                  Upgrade <Icon name="ArrowRight" size={11} />
+                </Link>
+              )}
+            </div>
+            {canExchange && allowExchanges && (
               <div className="mt-3 pl-12 space-y-2 animate-fadeIn">
                 <div className="flex items-center gap-3 flex-wrap">
                   <label className="text-[12.5px] text-muted shrink-0">Exchange window</label>
@@ -319,6 +438,7 @@ function GeneralTab({ settings }: any) {
 
       <div className="pb-6"><SaveBar onSave={handleSave} onDiscard={() => {
         setReturnWindow(settings.returnWindow);
+        setShippingMethod(settings.returnShippingMethod ?? "customer_pays");
         setAddress(settings.returnAddress);
         setAutoApprove(settings.autoApprove);
         setAutoExpireDays(settings.autoExpireDays ?? 7);
@@ -421,16 +541,17 @@ function ReasonsTab({ settings, plan }: any) {
 }
 
 // ---- Portal Access tab ----
-function PortalAccessTab({ shop, appUrl }: { shop: string; appUrl: string }) {
+function PortalAccessTab({ shop, appUrl, apiKey }: { shop: string; appUrl: string; apiKey: string }) {
   const [copied, setCopied] = useState<string | null>(null);
 
   const proxyUrl = `https://${shop}/apps/returns`;
   const directUrl = `${appUrl}/portal?shop=${shop}`;
   const iframeCode = `<iframe\n  src="${directUrl}"\n  width="100%"\n  height="700"\n  frameborder="0"\n  style="border:none;border-radius:12px;"\n></iframe>`;
 
-  const EXTENSION_UID = "e8b27fcc-79e9-97be-bb6e-f4b9ff6f32de1c30314c";
-  const EXTENSION_HANDLE = "TrackBack-return-button";
-  const themeEditorUrl = `https://${shop}/admin/themes/current/editor?addAppBlockId=${EXTENSION_UID}/${EXTENSION_HANDLE}&target=newAppsSection`;
+  // Format Shopify: addAppBlockId={api_client_id}/{block_file_handle}
+  // Le block est extensions/theme-return-button/blocks/return-button.liquid → "return-button".
+  const BLOCK_HANDLE = "return-button";
+  const themeEditorUrl = `https://${shop}/admin/themes/current/editor?template=index&addAppBlockId=${apiKey}/${BLOCK_HANDLE}&target=newAppsSection`;
 
   const copy = (key: string, text: string) => {
     navigator.clipboard.writeText(text).then(() => {

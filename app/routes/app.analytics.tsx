@@ -5,6 +5,8 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { PageHeader, Card } from "../components/ui";
 import { syncBillingFromShopify } from "../lib/plan.server";
+import { getShopCurrency } from "../lib/shop-currency.server";
+import { formatMoney } from "../lib/money";
 
 const ANALYTICS_COLORS = ['#6C63FF','#EF4444','#F59E0B','#3B82F6','#8B5CF6'];
 
@@ -60,15 +62,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const shop = session.shop;
 
   // Sync directly with Shopify to avoid races with the parent app.tsx loader.
-  const [returnRequests, plan] = await Promise.all([
+  const [returnRequests, plan, currency] = await Promise.all([
     prisma.returnRequest.findMany({ where: { shop }, include: { items: true }, orderBy: { createdAt: 'desc' } }),
     syncBillingFromShopify(admin, shop),
+    getShopCurrency(shop, admin),
   ]);
 
   const isStarter = plan === 'starter' || plan === 'pro';
 
   return {
     plan,
+    currency,
     p7:  computePeriod(returnRequests, 7),
     p30: isStarter ? computePeriod(returnRequests, 30) : null,
     p90: isStarter ? computePeriod(returnRequests, 90) : null,
@@ -76,7 +80,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export default function AnalyticsPage() {
-  const { p7, p30, p90, plan } = useLoaderData<typeof loader>();
+  const { p7, p30, p90, plan, currency } = useLoaderData<typeof loader>();
   const isStarter = plan === 'starter' || plan === 'pro';
   const [period, setPeriod] = useState(isStarter ? '30 days' : '7 days');
   const location = useLocation();
@@ -148,8 +152,8 @@ export default function AnalyticsPage() {
       {/* KPI row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <MiniKpi label="Total Returns"       value={String(total)}                        delta={total > 0 ? 'in period' : 'No returns yet'} tone="muted" />
-        <MiniKpi label="Refund Issued"       value={`$${totalRefunded.toFixed(2)}`}       delta="cash refunded"     tone={totalRefunded > 0 ? 'warn' : 'ok'} />
-        <MiniKpi label="Retained Revenue"    value={`$${retainedRevenue.toFixed(2)}`}     delta={`${retainedRatio}% of refunds`} tone="ok" />
+        <MiniKpi label="Refund Issued"       value={formatMoney(totalRefunded, currency)}       delta="cash refunded"     tone={totalRefunded > 0 ? 'warn' : 'ok'} />
+        <MiniKpi label="Retained Revenue"    value={formatMoney(retainedRevenue, currency)}     delta={`${retainedRatio}% of refunds`} tone="ok" />
         <MiniKpi label="Exchange Rate"       value={`${exchangeRate}%`}                   delta="of all returns"  tone="ok" />
       </div>
 
@@ -161,7 +165,7 @@ export default function AnalyticsPage() {
           </div>
           <div className="flex-1 min-w-0">
             <div className="text-[13px] font-semibold text-ink">
-              <span style={{ color: '#22C55E' }}>${retainedRevenue.toFixed(2)}</span> retained via store credit &amp; exchanges
+              <span style={{ color: '#22C55E' }}>{formatMoney(retainedRevenue, currency)}</span> retained via store credit &amp; exchanges
             </div>
             <div className="text-[12px] text-muted mt-0.5">Revenue that stayed in your store instead of going back to the customer.</div>
           </div>

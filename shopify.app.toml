@@ -23,6 +23,28 @@ api_version = "2026-07"
   topics = [ "app/scopes_update" ]
   uri = "/webhooks/app/scopes_update"
 
+  # ── Shopify native Returns sync ────────────────────────────────────────
+  [[webhooks.subscriptions]]
+  topics = [
+    "returns/request",
+    "returns/approve",
+    "returns/decline",
+    "returns/cancel",
+    "returns/close",
+    "returns/reopen",
+    "returns/update",
+    "returns/process",
+    "refunds/create"
+  ]
+  uri = "/webhooks/returns"
+
+  # Fired when a fulfillment is created on an order. We use it to retry any
+  # local ReturnRequest rows that couldn't be mirrored to Shopify at portal
+  # submission time because the order wasn't fulfilled yet.
+  [[webhooks.subscriptions]]
+  topics = [ "fulfillments/create" ]
+  uri = "/webhooks/fulfillments/create"
+
   [[webhooks.subscriptions]]
   uri = "/webhooks/customers/data_request"
   compliance_topics = [ "customers/data_request" ]
@@ -37,7 +59,7 @@ api_version = "2026-07"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_customers,read_draft_orders,read_orders,read_products,read_returns,read_store_credit_account_transactions,read_store_credit_accounts,write_draft_orders,write_gift_cards,write_orders,write_products,write_returns,write_store_credit_account_transactions"
+scopes = "read_assigned_fulfillment_orders,read_customers,read_draft_orders,read_fulfillments,read_merchant_managed_fulfillment_orders,read_orders,read_products,read_returns,read_store_credit_account_transactions,read_store_credit_accounts,write_draft_orders,write_gift_cards,write_orders,write_products,write_returns,write_store_credit_account_transactions"
 
 [auth]
 redirect_urls = [

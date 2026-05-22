@@ -3,20 +3,30 @@ import type { LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { Icon, StatusBadge, Card, PageHeader } from "../components/ui";
+import { syncReturnsForShop } from "../lib/returns-sync.server";
+import { getShopCurrency } from "../lib/shop-currency.server";
+import { formatMoney } from "../lib/money";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
   const shop = session.shop;
 
-  const returnRequests = await prisma.returnRequest.findMany({
-    where: { shop },
-    include: { items: true },
-    orderBy: { createdAt: 'desc' }
-  });
+  // Pull native Shopify Returns into the local DB so the dashboard reflects
+  // returns created from the Shopify Admin (Orders → Return items) or via
+  // any flow outside the TrackBack portal. Idempotent; safe to call always.
+  await syncReturnsForShop(shop, admin);
 
-  const settings = await prisma.shopSettings.findUnique({ where: { shop } });
+  const [returnRequests, settings, currency] = await Promise.all([
+    prisma.returnRequest.findMany({
+      where: { shop },
+      include: { items: true },
+      orderBy: { createdAt: 'desc' }
+    }),
+    prisma.shopSettings.findUnique({ where: { shop } }),
+    getShopCurrency(shop, admin),
+  ]);
 
-  return { returnRequests, settings, shop };
+  return { returnRequests, settings, shop, currency };
 };
 
 function KpiCard({ label, value, sub, subTone, icon, accentColor }: any) {
@@ -52,7 +62,7 @@ function KpiCard({ label, value, sub, subTone, icon, accentColor }: any) {
 }
 
 export default function DashboardPage() {
-  const { returnRequests, settings, shop } = useLoaderData<typeof loader>();
+  const { returnRequests, settings, shop, currency } = useLoaderData<typeof loader>();
   const location = useLocation();
 
   const pendingCount = returnRequests.filter((r: any) => r.status === 'PENDING').length;
@@ -123,7 +133,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 rf-stagger">
         <KpiCard label="Pending Review" value={pendingCount} sub="Requires action" subTone="warn" icon="Clock" accentColor="#F59E0B" />
         <KpiCard label="In Transit" value={shippedCount} sub="Awaiting receipt" subTone="ok" icon="Truck" accentColor="#10B981" />
-        <KpiCard label="Refunded This Month" value={`$${refundedThisMonth.toFixed(2)}`} sub="Total value" subTone="ok" icon="DollarSign" accentColor="#22C55E" />
+        <KpiCard label="Refunded This Month" value={formatMoney(refundedThisMonth, currency)} sub="Total value" subTone="ok" icon="DollarSign" accentColor="#22C55E" />
         <KpiCard label="Total Returns" value={returnRequests.length} sub="All time" subTone="muted" icon="TrendingDown" accentColor="#6C63FF" />
       </div>
 

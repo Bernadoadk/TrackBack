@@ -30,7 +30,9 @@ model Session {
 model ShopSettings {
   id                      String          @id @default(cuid())
   shop                    String          @unique
+  currency                String          @default("USD")
   returnWindow            Int             @default(30)
+  returnShippingMethod    String          @default("customer_pays")
   returnAddress           String          @default("Acme Store — Returns\n1450 Mission St, Suite 200\nSan Francisco, CA 94103\nUnited States")
   autoApprove             Boolean         @default(false)
   autoExpireDays          Int             @default(7)
@@ -87,6 +89,7 @@ model ReturnReason {
 model ReturnRequest {
   id               String         @id @default(cuid())
   rma              String         @unique
+  shopifyReturnId  String?        @unique
   shop             String
   orderId          String
   orderName        String
