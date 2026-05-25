@@ -238,9 +238,9 @@ export default function BillingPage() {
   const isNearLimit = pct >= 80;
   const isSaving = fetcher.state !== 'idle';
 
-  const handleUpgrade = (planId: string) => {
+  const handlePlanChange = (planId: string) => {
     const fd = new FormData();
-    fd.append("intent", "upgrade");
+    fd.append("intent", planId === 'free' ? "cancel" : "upgrade");
     fd.append("planId", planId);
     fetcher.submit(fd, { method: "POST" });
   };
@@ -375,8 +375,16 @@ export default function BillingPage() {
           const displayUnit = p.id === 'free' ? 'forever' : 'mo';
           const targetId = showAnnual ? p.annualId! : p.id;
           const targetName = showAnnual ? p.annualName! : p.name;
-          const isCurrent = (currentPlan.id === p.id && !isAnnualActive && !showAnnual) ||
-            (currentPlan.id === p.id && isAnnualActive && showAnnual);
+          
+          const baseIndex = PLANS.findIndex(plan => plan.id === p.id);
+          const currentBaseIndex = PLANS.findIndex(plan => plan.id === currentPlan.id);
+          const currentLevel = currentBaseIndex * 2 + (isAnnualActive ? 1 : 0);
+          const targetLevel = baseIndex * 2 + (showAnnual ? 1 : 0);
+          
+          const isCurrent = currentLevel === targetLevel;
+          const isDowngrade = targetLevel < currentLevel;
+          const actionText = isDowngrade ? `Downgrade to ${targetName}` : `Upgrade to ${targetName}`;
+
           const monthlyEquivalent = showAnnual ? p.price : null;
           return (
             <div key={p.id}
@@ -427,13 +435,13 @@ export default function BillingPage() {
                   </button>
                 ) : isPop ? (
                   <Btn variant="primary" className="w-full" size="lg" disabled={isSaving}
-                    onClick={() => handleUpgrade(targetId)}>
-                    {isSaving ? 'Redirecting...' : `Upgrade to ${targetName}`}
+                    onClick={() => handlePlanChange(targetId)}>
+                    {isSaving ? 'Redirecting...' : actionText}
                   </Btn>
                 ) : (
                   <Btn variant="secondary" className="w-full" size="lg" disabled={isSaving}
-                    onClick={() => handleUpgrade(targetId)}>
-                    {isSaving ? 'Redirecting...' : `Upgrade to ${targetName}`}
+                    onClick={() => handlePlanChange(targetId)}>
+                    {isSaving ? 'Redirecting...' : actionText}
                   </Btn>
                 )}
               </div>
