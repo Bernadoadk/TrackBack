@@ -235,17 +235,3 @@ Shopify:
 Internationalization:
 
 - [Internationalizing your app](https://shopify.dev/docs/apps/best-practices/internationalization/getting-started)
-
-
-
-DATABASE_URL=postgresql://postgres:postgres4@localhost:5432/returns-light-db
-
-# SMTP Gmail
-SMTP_HOST="smtp.gmail.com"
-SMTP_PORT="587"
-SMTP_SECURE="false"
-SMTP_USER="adikpetobernado@gmail.com"
-SMTP_PASS="xzad oqrs saop abqd"   # mot de passe application Google
-SMTP_FROM_NAME="TrackBack" 
-
----------------
