@@ -1,143 +1,302 @@
 import { useState, useEffect, type ReactNode } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
-import { useLoaderData, useSubmit, useNavigation, useActionData, Link, useLocation } from "react-router";
+import { useLoaderData, useSubmit, useNavigation, useActionData, useLocation, useFetcher } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { PageHeader, Btn, Icon, Toggle, Input, Textarea, Select, useToast } from "../components/ui";
+import { PageHeader, Btn, Icon, Toggle, Input, Textarea, Select, useToast, TierBadge, UpgradeNotice } from "../components/ui";
 import { DEFAULT_REASONS } from "../components/mock-data";
-import { getShopPlan, planAtLeast, syncBillingFromShopify } from "../lib/plan.server";
+import { ensureBillingSynced, getShopPlan } from "../lib/plan.server";
+import { hasFeature, requiredTier, type Feature } from "../lib/plans";
+import { LOCALE_LABELS, PAYOUT_METHODS, SUPPORTED_LOCALES, parseLocales } from "../lib/i18n";
+import { RETURN_METHOD_KEYS, getReturnMethods, parseList } from "../lib/returns-logic";
+import { randomSecret, sha256 } from "../lib/tokens.server";
+import { signWebhookBody } from "../lib/webhooks-out.server";
 
-function planAllowsStoreCredit(plan: string): boolean {
-  return plan === 'starter' || plan === 'starter_annual' || plan === 'pro' || plan === 'pro_annual';
-}
-function planAllowsExchange(plan: string): boolean {
-  return plan === 'pro' || plan === 'pro_annual';
-}
+// ─── Loader ─────────────────────────────────────────────────────────────────
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
   const shop = session.shop;
-  const appUrl = new URL(request.url).origin;
+  const appUrl = (process.env.SHOPIFY_APP_URL || new URL(request.url).origin).replace(/\/$/, "");
 
-  let settings = await prisma.shopSettings.findUnique({
-    where: { shop },
-    include: { reasons: true },
-  });
-
+  let settings = await prisma.shopSettings.findUnique({ where: { shop }, include: { reasons: true } });
   if (!settings) {
     settings = await prisma.shopSettings.create({
-      data: {
-        shop,
-        reasons: {
-          create: DEFAULT_REASONS.map(r => ({ label: r.label, enabled: r.enabled }))
-        }
-      },
-      include: { reasons: true }
+      data: { shop, reasons: { create: DEFAULT_REASONS.map(r => ({ label: r.label, enabled: r.enabled })) } },
+      include: { reasons: true },
     });
   }
+  const plan = await ensureBillingSynced(admin, shop);
+  const features = Object.fromEntries(
+    (["storeCredit", "variantExchange", "shopNow", "customReasons", "returnFees", "photos", "greenReturns", "orderTags",
+      "weeklyReport", "whatsapp", "automations", "fraud", "webhooks", "api"] as Feature[]).map((f) => [f, hasFeature(plan, f)]),
+  ) as Record<string, boolean>;
 
-  // Sync directly with Shopify to avoid races with the parent app.tsx loader.
-  // Email templates are managed on the dedicated /app/email-templates page,
-  // which also handles its own seeding — no need to load them here.
-  const plan = await syncBillingFromShopify(admin, shop);
-
-  // Theme app extension deep links use the app's client_id (SHOPIFY_API_KEY)
-  // as the identifier — Shopify resolves blocks by {api_client_id}/{block_handle}.
-  const apiKey = process.env.SHOPIFY_API_KEY ?? "";
-
-  return { settings, shop, appUrl, plan, apiKey };
+  // Never ship secrets to the browser.
+  const { whatsappAccessToken, apiKeyHash, ...safe } = settings;
+  return {
+    settings: {
+      ...safe,
+      hasWhatsappToken: !!whatsappAccessToken,
+      hasApiKey: !!apiKeyHash,
+      returnMethodsList: getReturnMethods(settings),
+    },
+    shop,
+    appUrl,
+    plan,
+    features,
+    apiKey: process.env.SHOPIFY_API_KEY ?? "",
+  };
 };
+
+// ─── Action ─────────────────────────────────────────────────────────────────
+
+const bool = (v: unknown) => v === true || v === "true";
+const int = (v: unknown, min: number, max: number, fallback: number) => {
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+};
+const num = (v: unknown, min: number, max: number, fallback: number) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+};
+const str = (v: unknown, max: number) => String(v ?? "").slice(0, max);
+const cleanList = (v: unknown, max = 2000) =>
+  parseList(str(v, max)).map((x) => x.slice(0, 120)).join(", ");
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
+  const plan = await getShopPlan(shop);
+  const can = (f: Feature) => hasFeature(plan, f);
   const formData = await request.formData();
-  const intent = formData.get("intent");
-
-  if (intent === "save_general") {
-    // Server-side plan gating — never let a client bypass the toggles by
-    // crafting a request directly. Lower-tier merchants get forced false.
-    const plan = await getShopPlan(shop);
-    const reqStoreCredit = formData.get("allowStoreCredit") === "true";
-    const reqExchanges = formData.get("allowExchanges") === "true";
-    const reqShippingMethod = formData.get("returnShippingMethod") as string;
-    const validShippingMethods = ["customer_pays", "merchant_provides_label"];
-    await prisma.shopSettings.update({
-      where: { shop },
-      data: {
-        returnWindow: Number(formData.get("returnWindow")),
-        returnShippingMethod: validShippingMethods.includes(reqShippingMethod)
-          ? reqShippingMethod
-          : "customer_pays",
-        returnAddress: formData.get("returnAddress") as string,
-        autoApprove: formData.get("autoApprove") === "true",
-        autoExpireDays: Number(formData.get("autoExpireDays")) || 7,
-        blockedSkus: formData.get("blockedSkus") as string || "",
-        notifyMerchant: formData.get("notifyMerchant") === "true",
-        fromEmail: formData.get("fromEmail") as string,
-        allowStoreCredit: planAllowsStoreCredit(plan) ? reqStoreCredit : false,
-        allowExchanges: planAllowsExchange(plan) ? reqExchanges : false,
-        storeCreditBonusPercent: Number(formData.get("storeCreditBonusPercent")),
-        incentivizeStoreCredit: formData.get("incentivizeStoreCredit") === "true"
-      }
-    });
-  } else if (intent === "save_reasons") {
-    const shopPlan = await getShopPlan(shop);
-    if (!planAtLeast(shopPlan, 'pro')) {
-      return { error: 'upgrade_required' };
-    }
-    const reasonsStr = formData.get("reasons") as string;
-    const reasons = JSON.parse(reasonsStr);
-
-    await prisma.$transaction([
-      prisma.returnReason.deleteMany({ where: { shop } }),
-      prisma.returnReason.createMany({
-        data: reasons.map((r: any) => ({ shop, label: r.label, enabled: r.enabled }))
-      })
-    ]);
-  } else if (intent === "save_policy") {
-    await prisma.shopSettings.update({
-      where: { shop },
-      data: { returnPolicy: formData.get("returnPolicy") as string }
-    });
+  const intent = String(formData.get("intent") ?? "");
+  let d: any = {};
+  try {
+    d = JSON.parse(String(formData.get("data") ?? "{}"));
+  } catch {
+    return { ok: false, intent, error: "Invalid data" };
   }
+  const current = await prisma.shopSettings.findUnique({ where: { shop } });
+  if (!current) return { ok: false, intent, error: "Settings not found" };
 
-  return { success: true };
+  switch (intent) {
+    case "save_general": {
+      const locales = parseLocales(Array.isArray(d.portalLocales) ? d.portalLocales.join(",") : d.portalLocales);
+      const defaultLocale = locales.includes(d.defaultLocale) ? d.defaultLocale : locales[0];
+      await prisma.shopSettings.update({
+        where: { shop },
+        data: {
+          returnWindow: int(d.returnWindow, 1, 365, current.returnWindow),
+          returnWindowBasis: d.returnWindowBasis === "order" ? "order" : "fulfillment",
+          returnAddress: str(d.returnAddress, 1000),
+          fromEmail: str(d.fromEmail, 254).trim(),
+          notifyMerchant: bool(d.notifyMerchant),
+          autoApprove: bool(d.autoApprove),
+          autoExpireDays: int(d.autoExpireDays, 1, 90, 7),
+          portalLocales: locales.join(","),
+          defaultLocale,
+          portalDisplayMode: d.portalDisplayMode === "standalone" ? "standalone" : "embedded",
+          ...(can("automations")
+            ? {
+                autoApproveMaxAmount: num(d.autoApproveMaxAmount, 0, 1e9, 0),
+                autoApproveSkipRisky: bool(d.autoApproveSkipRisky),
+                autoRefundOnReceive: bool(d.autoRefundOnReceive),
+                autoRefundOriginal: bool(d.autoRefundOriginal),
+              }
+            : {}),
+        },
+      });
+      break;
+    }
+    case "save_eligibility": {
+      await prisma.shopSettings.update({
+        where: { shop },
+        data: {
+          blockedSkus: cleanList(d.blockedSkus),
+          blockedTags: cleanList(d.blockedTags),
+          blockedProductTypes: cleanList(d.blockedProductTypes),
+          blockDiscountedItems: bool(d.blockDiscountedItems),
+          oneReturnPerOrder: bool(d.oneReturnPerOrder),
+          ...(can("fraud")
+            ? { blockedEmails: cleanList(d.blockedEmails, 5000), riskReturnThreshold: int(d.riskReturnThreshold, 1, 50, 3) }
+            : {}),
+        },
+      });
+      break;
+    }
+    case "save_methods": {
+      const methods = (Array.isArray(d.returnMethods) ? d.returnMethods : [])
+        .filter((m: string) => (RETURN_METHOD_KEYS as readonly string[]).includes(m));
+      await prisma.shopSettings.update({
+        where: { shop },
+        data: {
+          returnMethods: (methods.length ? methods : ["ship"]).join(","),
+          returnShippingMethod: methods.includes("label") && !methods.includes("ship") ? "merchant_provides_label" : "customer_pays",
+          storeDropoffInfo: str(d.storeDropoffInfo, 1000),
+          pickupInfo: str(d.pickupInfo, 1000),
+          ...(can("returnFees")
+            ? {
+                returnShippingFee: num(d.returnShippingFee, 0, 1e6, 0),
+                restockingFeePercent: num(d.restockingFeePercent, 0, 100, 0),
+                feeWaivedForStoreCredit: bool(d.feeWaivedForStoreCredit),
+                feeWaivedForExchange: bool(d.feeWaivedForExchange),
+                feeExemptReasons: cleanList(d.feeExemptReasons),
+              }
+            : {}),
+        },
+      });
+      break;
+    }
+    case "save_refunds": {
+      const allowedPayouts = new Set<string>(PAYOUT_METHODS.map((p) => p.key));
+      const payouts = (Array.isArray(d.payoutMethods) ? d.payoutMethods : []).filter((k: string) => allowedPayouts.has(k));
+      await prisma.shopSettings.update({
+        where: { shop },
+        data: {
+          allowStoreCredit: can("storeCredit") ? bool(d.allowStoreCredit) : false,
+          storeCreditBonusPercent: int(d.storeCreditBonusPercent, 0, 50, 0),
+          incentivizeStoreCredit: bool(d.incentivizeStoreCredit),
+          storeCreditMethod: ["auto", "store_credit", "gift_card"].includes(d.storeCreditMethod) ? d.storeCreditMethod : "auto",
+          allowExchanges: can("variantExchange") ? bool(d.allowExchanges) : false,
+          allowShopNow: can("shopNow") ? bool(d.allowShopNow) : false,
+          greenReturnsEnabled: can("greenReturns") ? bool(d.greenReturnsEnabled) : false,
+          greenReturnMaxAmount: num(d.greenReturnMaxAmount, 0, 1e7, 0),
+          photosEnabled: can("photos") ? bool(d.photosEnabled) : false,
+          codRefundsEnabled: bool(d.codRefundsEnabled),
+          payoutMethods: (payouts.length ? payouts : ["bank_transfer", "cash"]).join(","),
+        },
+      });
+      break;
+    }
+    case "save_reasons": {
+      if (!can("customReasons")) return { ok: false, intent, error: "Custom reasons require the Starter plan." };
+      const reasons = (Array.isArray(d.reasons) ? d.reasons : [])
+        .map((r: any) => ({ label: str(r.label, 120).trim(), enabled: bool(r.enabled), requirePhoto: can("photos") && bool(r.requirePhoto) }))
+        .filter((r: any) => r.label)
+        .slice(0, 40);
+      await prisma.$transaction([
+        prisma.returnReason.deleteMany({ where: { shop } }),
+        prisma.returnReason.createMany({ data: reasons.map((r: any) => ({ shop, ...r })) }),
+      ]);
+      break;
+    }
+    case "save_policy": {
+      await prisma.shopSettings.update({
+        where: { shop },
+        data: { returnPolicy: str(d.returnPolicy, 20000), euWithdrawalEnabled: bool(d.euWithdrawalEnabled) },
+      });
+      break;
+    }
+    case "save_notifications": {
+      await prisma.shopSettings.update({
+        where: { shop },
+        data: {
+          weeklyReportEnabled: bool(d.weeklyReportEnabled),
+          orderTagsEnabled: bool(d.orderTagsEnabled),
+          ...(can("whatsapp")
+            ? {
+                whatsappNumber: str(d.whatsappNumber, 30).replace(/[^\d+]/g, ""),
+                whatsappNotifyEnabled: bool(d.whatsappNotifyEnabled),
+                whatsappPhoneNumberId: str(d.whatsappPhoneNumberId, 40).trim(),
+                whatsappTemplateName: str(d.whatsappTemplateName, 80).trim(),
+                whatsappTemplateLang: str(d.whatsappTemplateLang, 10).trim() || "en",
+                ...(d.whatsappAccessToken ? { whatsappAccessToken: str(d.whatsappAccessToken, 1000).trim() } : {}),
+              }
+            : {}),
+        },
+      });
+      break;
+    }
+    case "save_webhook": {
+      if (!can("webhooks")) return { ok: false, intent, error: "Webhooks require the Pro plan." };
+      const url = str(d.webhookUrl, 500).trim();
+      if (url && !/^https:\/\//i.test(url)) return { ok: false, intent, error: "The webhook URL must start with https://" };
+      await prisma.shopSettings.update({
+        where: { shop },
+        data: { webhookUrl: url, ...(current.webhookSecret ? {} : { webhookSecret: `whsec_${randomSecret(24)}` }) },
+      });
+      break;
+    }
+    case "rotate_webhook_secret": {
+      if (!can("webhooks")) return { ok: false, intent, error: "Webhooks require the Pro plan." };
+      await prisma.shopSettings.update({ where: { shop }, data: { webhookSecret: `whsec_${randomSecret(24)}` } });
+      break;
+    }
+    case "test_webhook": {
+      if (!can("webhooks") || !current.webhookUrl) return { ok: false, intent, error: "Save a webhook URL first." };
+      const body = JSON.stringify({ id: `test_${Date.now()}`, event: "test.ping", shop, occurred_at: new Date().toISOString(), data: {} });
+      try {
+        const res = await fetch(current.webhookUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-TrackBack-Event": "test.ping",
+            "X-TrackBack-Signature": `sha256=${signWebhookBody(current.webhookSecret, body)}`,
+          },
+          body,
+          signal: AbortSignal.timeout(5000),
+        });
+        await prisma.shopSettings.update({ where: { shop }, data: { webhookLastStatus: `test.ping → ${res.status}`, webhookLastAt: new Date() } });
+        return { ok: res.ok, intent, error: res.ok ? undefined : `Endpoint answered HTTP ${res.status}` };
+      } catch (e: any) {
+        return { ok: false, intent, error: `Delivery failed: ${e?.message ?? "network error"}` };
+      }
+    }
+    case "generate_api_key": {
+      if (!can("api")) return { ok: false, intent, error: "The API requires the Pro plan." };
+      const key = `tb_live_${randomSecret(24)}`;
+      await prisma.shopSettings.update({ where: { shop }, data: { apiKeyHash: sha256(key), apiKeyPrefix: key.slice(0, 12) } });
+      return { ok: true, intent, apiKey: key };
+    }
+    case "revoke_api_key": {
+      await prisma.shopSettings.update({ where: { shop }, data: { apiKeyHash: "", apiKeyPrefix: "" } });
+      break;
+    }
+    default:
+      return { ok: false, intent, error: "Unknown action" };
+  }
+  return { ok: true, intent };
 };
 
+// ─── Page ───────────────────────────────────────────────────────────────────
+
+const TABS = [
+  { key: "General", icon: "Settings2" },
+  { key: "Eligibility", icon: "ShieldCheck" },
+  { key: "Returns & fees", icon: "Truck" },
+  { key: "Refunds", icon: "Wallet" },
+  { key: "Reasons", icon: "Tag" },
+  { key: "Policy", icon: "FileText" },
+  { key: "Notifications", icon: "Bell" },
+  { key: "Integrations", icon: "Webhook" },
+  { key: "Portal", icon: "Globe" },
+] as const;
+
+type LoaderData = ReturnType<typeof useLoaderData<typeof loader>>;
+
 export default function SettingsPage() {
-  const { settings, shop, appUrl, plan, apiKey } = useLoaderData<typeof loader>();
-
-  const tabs = [
-    { key: 'General', icon: 'Settings2' },
-    { key: 'Reasons', icon: 'Tag' },
-    { key: 'Policy', icon: 'FileText' },
-    { key: 'Portal', icon: 'Globe' },
-  ];
-
-  // Support deep-link via ?tab=Portal (or any other tab key)
+  const data = useLoaderData<typeof loader>();
   const initialTab = (() => {
-    if (typeof window === 'undefined') return 'General';
-    const t = new URL(window.location.href).searchParams.get('tab');
-    return tabs.some(x => x.key === t) ? (t as string) : 'General';
+    if (typeof window === "undefined") return "General";
+    const t = new URL(window.location.href).searchParams.get("tab");
+    return TABS.some((x) => x.key === t) ? (t as string) : "General";
   })();
-  const [tab, setTab] = useState(initialTab);
+  const [tab, setTab] = useState<string>(initialTab);
   useEffect(() => {
-    const t = new URL(window.location.href).searchParams.get('tab');
-    if (t && tabs.some(x => x.key === t)) setTab(t);
+    const t = new URL(window.location.href).searchParams.get("tab");
+    if (t && TABS.some((x) => x.key === t)) setTab(t);
   }, []);
 
   return (
     <div>
       <PageHeader title="Settings" subtitle="Configure how returns work for your store." />
-
-      {/* Secondary tab nav */}
       <div className="flex items-center gap-1 border-b border-divider mb-6 overflow-x-auto">
-        {tabs.map(t => {
+        {TABS.map((t) => {
           const active = tab === t.key;
           return (
             <button key={t.key} onClick={() => setTab(t.key)}
-              className={`relative inline-flex items-center gap-2 px-3.5 py-2.5 text-[13px] font-medium transition-colors whitespace-nowrap ${active ? 'text-ink' : 'text-muted hover:text-ink'}`}>
+              className={`relative inline-flex items-center gap-2 px-3.5 py-2.5 text-[13px] font-medium transition-colors whitespace-nowrap ${active ? "text-ink" : "text-muted hover:text-ink"}`}>
               <Icon name={t.icon} size={13.5} />
               {t.key}
               {active && <span className="absolute left-2 right-2 -bottom-px h-[2px] bg-accent rounded-full" />}
@@ -146,405 +305,615 @@ export default function SettingsPage() {
         })}
       </div>
 
-      {tab === 'General' && <GeneralTab settings={settings} plan={plan} />}
-      {tab === 'Reasons' && <ReasonsTab settings={settings} plan={plan} />}
-      {tab === 'Policy' && <PolicyTab settings={settings} />}
-      {tab === 'Portal' && <PortalAccessTab shop={shop} appUrl={appUrl} apiKey={apiKey} />}
+      {tab === "General" && <GeneralTab data={data} />}
+      {tab === "Eligibility" && <EligibilityTab data={data} />}
+      {tab === "Returns & fees" && <MethodsTab data={data} />}
+      {tab === "Refunds" && <RefundsTab data={data} />}
+      {tab === "Reasons" && <ReasonsTab data={data} />}
+      {tab === "Policy" && <PolicyTab data={data} />}
+      {tab === "Notifications" && <NotificationsTab data={data} />}
+      {tab === "Integrations" && <IntegrationsTab data={data} />}
+      {tab === "Portal" && <PortalAccessTab shop={data.shop} appUrl={data.appUrl} apiKey={data.apiKey} withdrawal={data.settings.euWithdrawalEnabled} />}
     </div>
   );
 }
 
-function SettingRow({ label, hint, children, wide }: any) {
+// ─── Shared building blocks ─────────────────────────────────────────────────
+
+function useSettingsForm<T extends Record<string, any>>(intent: string, initial: T) {
+  const submit = useSubmit();
+  const navigation = useNavigation();
+  const actionData = useActionData<typeof action>() as any;
+  const toast = useToast();
+  const [values, setValues] = useState<T>(initial);
+  const set = <K extends keyof T>(k: K, v: T[K]) => setValues((p) => ({ ...p, [k]: v }));
+  const isSaving = navigation.state === "submitting" && navigation.formData?.get("intent") === intent;
+  const [pending, setPending] = useState(false);
+  useEffect(() => {
+    if (!pending || navigation.state !== "idle" || !actionData || actionData.intent !== intent) return;
+    setPending(false);
+    if (actionData.ok) toast({ kind: "success", title: "Settings saved" });
+    else toast({ kind: "error", title: "Couldn't save", body: actionData.error });
+  }, [actionData, navigation.state, pending, intent, toast]);
+  const save = () => {
+    const fd = new FormData();
+    fd.append("intent", intent);
+    fd.append("data", JSON.stringify(values));
+    setPending(true);
+    submit(fd, { method: "POST" });
+  };
+  return { values, set, save, reset: () => setValues(initial), isSaving };
+}
+
+function SettingRow({ label, hint, children, tier, allowed = true }: { label: ReactNode; hint?: ReactNode; children: ReactNode; tier?: "starter" | "pro"; allowed?: boolean }) {
   return (
-    <div className={`py-5 border-b border-divider last:border-0 grid ${wide ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-[260px_1fr]'} gap-3 md:gap-8`}>
+    <div className="py-5 border-b border-divider last:border-0 grid grid-cols-1 md:grid-cols-[260px_1fr] gap-3 md:gap-8">
       <div className="pt-1">
-        <div className="text-[13.5px] font-semibold text-ink">{label}</div>
+        <div className="text-[13.5px] font-semibold text-ink flex items-center gap-2">{label}{tier && <TierBadge tier={tier} />}</div>
         {hint && <div className="text-[12px] text-muted mt-1 leading-relaxed max-w-[260px]">{hint}</div>}
       </div>
-      <div className="max-w-xl">{children}</div>
+      <div className="max-w-xl">
+        <div className={allowed ? "" : "opacity-50 pointer-events-none select-none"}>{children}</div>
+        {!allowed && tier && <div className="mt-2"><UpgradeNotice tier={tier} /></div>}
+      </div>
     </div>
   );
 }
 
 function SaveBar({ onSave, onDiscard, isSaving, disabled }: any) {
   return (
-    <div className="mt-6 flex items-center justify-end gap-2">
+    <div className="py-5 flex items-center justify-end gap-2">
       <Btn variant="ghost" onClick={onDiscard} disabled={isSaving || disabled}>Discard</Btn>
-      <Btn variant="primary" icon="Check" onClick={onSave} disabled={isSaving || disabled}>
-        {isSaving ? 'Saving...' : 'Save Changes'}
+      <Btn variant="primary" icon="Check" onClick={onSave} disabled={isSaving || disabled} loading={isSaving}>
+        {isSaving ? "Saving…" : "Save changes"}
       </Btn>
     </div>
   );
 }
 
-// ---- General tab ----
-function GeneralTab({ settings, plan }: any) {
-  // Plan tiers — store credit needs Starter+, exchanges need Pro.
-  const canStoreCredit = plan === 'starter' || plan === 'starter_annual' || plan === 'pro' || plan === 'pro_annual';
-  const canExchange = plan === 'pro' || plan === 'pro_annual';
-  const location = useLocation();
-  const billingHref = `/app/billing${location.search}`;
-  const submit = useSubmit();
-  const navigation = useNavigation();
-  const toast = useToast();
-  const isSaving = navigation.state === "submitting" && navigation.formData?.get("intent") === "save_general";
-  const actionData = useActionData<typeof action>();
-
-  const [returnWindow, setReturnWindow] = useState(settings.returnWindow);
-  const [shippingMethod, setShippingMethod] = useState<string>(
-    settings.returnShippingMethod ?? "customer_pays",
-  );
-  const [address, setAddress] = useState(settings.returnAddress);
-  const [autoApprove, setAutoApprove] = useState(settings.autoApprove);
-  const [autoExpireDays, setAutoExpireDays] = useState(settings.autoExpireDays ?? 7);
-  const [blockedSkus, setBlockedSkus] = useState(settings.blockedSkus ?? "");
-  const [notify, setNotify] = useState(settings.notifyMerchant);
-  const [fromEmail, setFromEmail] = useState(settings.fromEmail);
-  const [allowStoreCredit, setAllowStoreCredit] = useState(settings.allowStoreCredit);
-  const [allowExchanges, setAllowExchanges] = useState(settings.allowExchanges);
-  const [storeCreditBonusPercent, setStoreCreditBonusPercent] = useState(settings.storeCreditBonusPercent);
-  const [incentivizeStoreCredit, setIncentivizeStoreCredit] = useState(settings.incentivizeStoreCredit);
-
-  useEffect(() => {
-    if (actionData?.success && navigation.state === "idle" && navigation.formData?.get("intent") === "save_general") {
-      toast({ kind: 'success', title: 'General settings saved' });
-    }
-  }, [actionData, navigation.state, navigation.formData]);
-
-  const handleSave = () => {
-    const formData = new FormData();
-    formData.append("intent", "save_general");
-    formData.append("returnWindow", returnWindow.toString());
-    formData.append("returnShippingMethod", shippingMethod);
-    formData.append("returnAddress", address);
-    formData.append("autoApprove", autoApprove.toString());
-    formData.append("autoExpireDays", autoExpireDays.toString());
-    formData.append("blockedSkus", blockedSkus);
-    formData.append("notifyMerchant", notify.toString());
-    formData.append("fromEmail", fromEmail);
-    formData.append("allowStoreCredit", allowStoreCredit.toString());
-    formData.append("allowExchanges", allowExchanges.toString());
-    formData.append("storeCreditBonusPercent", storeCreditBonusPercent.toString());
-    formData.append("incentivizeStoreCredit", incentivizeStoreCredit.toString());
-
-    submit(formData, { method: "POST" });
-  };
-
+function NumberField({ value, onChange, suffix, min = 0, max, step = 1, width = "w-24" }: any) {
   return (
-    <div className="bg-surface border border-border rounded-lg px-6">
-      <SettingRow label="Return shipping method" hint="Who pays for the customer's return shipment. Controls how the return flow is presented in the customer portal and the admin approve modal.">
-        <div className="space-y-2">
-          {[
-            {
-              value: 'customer_pays',
-              title: 'Customer pays for return shipping',
-              desc: 'Customer ships back at their own cost and submits tracking via your portal.',
-              icon: 'User',
-              color: '#3B82F6',
-            },
-            {
-              value: 'merchant_provides_label',
-              title: 'I provide a prepaid return label',
-              desc: 'You attach a prepaid label when approving. Customer just drops off the package.',
-              icon: 'Tag',
-              color: '#22C55E',
-            },
-          ].map((opt) => {
-            const sel = shippingMethod === opt.value;
-            return (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => setShippingMethod(opt.value)}
-                className={`w-full text-left p-3 rounded-md border-2 transition flex items-start gap-3 ${
-                  sel ? 'border-accent bg-accent/[0.06]' : 'border-divider hover:border-[#3a3e58]'
-                }`}
-              >
-                <div
-                  className="w-8 h-8 rounded-md grid place-content-center shrink-0"
-                  style={{ background: `${opt.color}1f`, color: opt.color }}
-                >
-                  <Icon name={opt.icon} size={15} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[13px] font-semibold text-ink">{opt.title}</div>
-                  <div className="text-[11.5px] text-muted mt-0.5 leading-relaxed">{opt.desc}</div>
-                </div>
-                {sel && <Icon name="Check" size={15} className="text-accent2 shrink-0 mt-1" strokeWidth={2.5} />}
-              </button>
-            );
-          })}
-        </div>
-      </SettingRow>
-
-      <SettingRow label="Return window" hint="How many days after delivery customers can request a return.">
-        <div className="flex items-center gap-2">
-          <input type="number" value={returnWindow} onChange={e => setReturnWindow(+e.target.value)}
-            className="w-24 h-9 px-3 text-[13px] rounded-md bg-bg border border-border text-ink focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 text-center tabular-nums" />
-          <span className="text-[13px] text-muted">days</span>
-        </div>
-      </SettingRow>
-
-      <SettingRow label="Return address" hint="Shown on the customer-facing return label and confirmation emails.">
-        <Textarea value={address} onChange={(e: any) => setAddress(e.target.value)} rows={4} />
-      </SettingRow>
-
-      <SettingRow label="Auto-approve returns" hint="Skip manual review for returns under your return window.">
-        <Toggle checked={autoApprove} onChange={setAutoApprove}
-          label={autoApprove ? 'Returns are auto-approved' : 'Manual review required'}
-          description="Recommended off until your reason policy is tuned." />
-      </SettingRow>
-
-      <SettingRow label="Auto-expire approved returns" hint="Automatically expire approved returns if the customer hasn't shipped after this many days.">
-        <div className="flex items-center gap-2">
-          <input type="number" min={1} max={60} value={autoExpireDays} onChange={e => setAutoExpireDays(Math.max(1, +e.target.value))}
-            className="w-24 h-9 px-3 text-[13px] rounded-md bg-bg border border-border text-ink focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 text-center tabular-nums" />
-          <span className="text-[13px] text-muted">days after approval</span>
-        </div>
-      </SettingRow>
-
-      <SettingRow label="Blocked SKUs / product IDs" hint="Comma-separated list of SKUs or Shopify product IDs that cannot be returned. Leave empty to allow all.">
-        <Textarea
-          value={blockedSkus}
-          onChange={(e: any) => setBlockedSkus(e.target.value)}
-          rows={3}
-          placeholder="e.g. SALE-FINAL, SKU-001, gid://shopify/Product/123456789"
-        />
-        <div className="mt-1.5 text-[11.5px] text-faint">Customers will see an error if they try to return these items.</div>
-      </SettingRow>
-
-      <SettingRow label="Notify merchant" hint="Get an email each time a customer files a new return.">
-        <Toggle checked={notify} onChange={setNotify}
-          label="Email me when a new request comes in"
-          description={fromEmail} />
-      </SettingRow>
-
-      <SettingRow label="From email" hint="The reply-to address on automated emails to customers.">
-        <Input value={fromEmail} onChange={(e: any) => setFromEmail(e.target.value)} type="email" />
-      </SettingRow>
-
-      {/* Revenue Retention section */}
-      <div className="py-6 border-b border-divider last:border-0">
-        <div className="mb-4 flex items-start gap-3">
-          <div className="w-9 h-9 rounded-md grid place-content-center shrink-0" style={{ background: 'rgba(108,99,255,0.15)', color: '#8B85FF' }}>
-            <Icon name="TrendingUp" size={16} />
-          </div>
-          <div>
-            <div className="text-[14px] font-semibold text-ink">Revenue Retention</div>
-            <div className="text-[12.5px] text-muted mt-0.5 max-w-md leading-relaxed">
-              Encourage customers to keep revenue in your store instead of requesting refunds.
-            </div>
-          </div>
-        </div>
-
-        <div className="space-y-4 ml-0 md:ml-12">
-          {/* Store credit — Starter+ feature */}
-          <div className="p-4 rounded-md bg-bg/40 border border-divider">
-            <div className="flex items-start justify-between gap-3">
-              <Toggle
-                checked={canStoreCredit && allowStoreCredit}
-                onChange={(v: boolean) => canStoreCredit && setAllowStoreCredit(v)}
-                label={
-                  <span className="flex items-center gap-2">
-                    Allow Store Credit refunds
-                    {!canStoreCredit && (
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide rounded"
-                        style={{ background: 'rgba(139,92,246,0.15)', color: '#8B5CF6' }}>
-                        <Icon name="Lock" size={9} /> Starter
-                      </span>
-                    )}
-                  </span>
-                }
-                description="Let customers choose store credit — issued instantly, retains revenue."
-                disabled={!canStoreCredit} />
-              {!canStoreCredit && (
-                <Link to={billingHref}
-                  className="shrink-0 h-7 px-3 rounded-md text-[11.5px] font-semibold text-white flex items-center gap-1"
-                  style={{ background: '#8B5CF6' }}>
-                  Upgrade <Icon name="ArrowRight" size={11} />
-                </Link>
-              )}
-            </div>
-            {canStoreCredit && allowStoreCredit && (
-              <div className="mt-3 pl-12 space-y-3 animate-fadeIn">
-                <div className="flex items-center gap-3 flex-wrap">
-                  <label className="text-[12.5px] text-muted shrink-0">Store credit bonus</label>
-                  <div className="flex items-center gap-1.5">
-                    <input type="number" min={0} max={50}
-                      value={storeCreditBonusPercent}
-                      onChange={e => setStoreCreditBonusPercent(Math.max(0, Math.min(50, +e.target.value || 0)))}
-                      placeholder="10"
-                      className="w-20 h-8 px-3 text-[13px] rounded-md bg-bg border border-border text-ink focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 text-center tabular-nums" />
-                    <span className="text-[12.5px] text-muted">% bonus</span>
-                  </div>
-                  <span className="text-[11.5px] text-faint">0 = no bonus</span>
-                </div>
-                <Toggle checked={incentivizeStoreCredit}
-                  onChange={setIncentivizeStoreCredit}
-                  label="Incentivize store credit in the portal"
-                  description="Show a badge and the bonus percentage on the store-credit option." />
-                {incentivizeStoreCredit && storeCreditBonusPercent > 0 && (
-                  <div className="px-3 py-2 rounded-md text-[12px] flex items-center gap-2 animate-fadeIn"
-                    style={{ background: 'rgba(108,99,255,0.10)', color: '#8B85FF' }}>
-                    <Icon name="Sparkles" size={12} />
-                    Customers will see <strong className="text-ink">+{storeCreditBonusPercent}% bonus credit</strong> on the store-credit option.
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Exchanges — Pro-only feature */}
-          <div className="p-4 rounded-md bg-bg/40 border border-divider">
-            <div className="flex items-start justify-between gap-3">
-              <Toggle
-                checked={canExchange && allowExchanges}
-                onChange={(v: boolean) => canExchange && setAllowExchanges(v)}
-                label={
-                  <span className="flex items-center gap-2">
-                    Allow Exchanges
-                    {!canExchange && (
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide rounded"
-                        style={{ background: 'rgba(245,158,11,0.18)', color: '#F59E0B' }}>
-                        <Icon name="Lock" size={9} /> Pro
-                      </span>
-                    )}
-                  </span>
-                }
-                description="Let customers swap an item for another size, color, or product."
-                disabled={!canExchange} />
-              {!canExchange && (
-                <Link to={billingHref}
-                  className="shrink-0 h-7 px-3 rounded-md text-[11.5px] font-semibold text-white flex items-center gap-1"
-                  style={{ background: '#F59E0B' }}>
-                  Upgrade <Icon name="ArrowRight" size={11} />
-                </Link>
-              )}
-            </div>
-            {canExchange && allowExchanges && (
-              <div className="mt-3 pl-12 space-y-2 animate-fadeIn">
-                <div className="flex items-center gap-3 flex-wrap">
-                  <label className="text-[12.5px] text-muted shrink-0">Exchange window</label>
-                  <span className="text-[12.5px] text-ink">Same as return window ({returnWindow} days)</span>
-                </div>
-                <div className="text-[11.5px] text-muted leading-relaxed">
-                  Customers will be able to select <span className="text-ink">Exchange</span> as their refund type in the portal.
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="pb-6"><SaveBar onSave={handleSave} onDiscard={() => {
-        setReturnWindow(settings.returnWindow);
-        setShippingMethod(settings.returnShippingMethod ?? "customer_pays");
-        setAddress(settings.returnAddress);
-        setAutoApprove(settings.autoApprove);
-        setAutoExpireDays(settings.autoExpireDays ?? 7);
-        setBlockedSkus(settings.blockedSkus ?? "");
-        setNotify(settings.notifyMerchant);
-        setFromEmail(settings.fromEmail);
-        setAllowStoreCredit(settings.allowStoreCredit);
-        setAllowExchanges(settings.allowExchanges);
-        setStoreCreditBonusPercent(settings.storeCreditBonusPercent);
-        setIncentivizeStoreCredit(settings.incentivizeStoreCredit);
-      }} isSaving={isSaving} /></div>
+    <div className="flex items-center gap-2">
+      <input type="number" value={value} min={min} max={max} step={step} onChange={(e) => onChange(e.target.value === "" ? "" : Number(e.target.value))}
+        className={`${width} h-9 px-3 text-[13px] rounded-md bg-bg border border-border text-ink focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 text-center tabular-nums`} />
+      {suffix && <span className="text-[13px] text-muted">{suffix}</span>}
     </div>
   );
 }
 
-// ---- Reasons tab ----
-function ReasonsTab({ settings, plan }: any) {
-  const isPro = plan === 'pro';
-  const submit = useSubmit();
-  const navigation = useNavigation();
-  const toast = useToast();
-  const location = useLocation();
-  const billingHref = `/app/billing${location.search}`;
-  const isSaving = navigation.state === "submitting" && navigation.formData?.get("intent") === "save_reasons";
-  const actionData = useActionData<typeof action>();
+function ChoiceCards({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: { value: string; title: string; desc: string; icon: string; color: string }[] }) {
+  return (
+    <div className="space-y-2">
+      {options.map((opt) => {
+        const sel = value === opt.value;
+        return (
+          <button key={opt.value} type="button" onClick={() => onChange(opt.value)}
+            className={`w-full text-left p-3 rounded-md border-2 transition flex items-start gap-3 ${sel ? "border-accent bg-accent/[0.06]" : "border-divider hover:border-[#3a3e58]"}`}>
+            <div className="w-8 h-8 rounded-md grid place-content-center shrink-0" style={{ background: `${opt.color}1f`, color: opt.color }}>
+              <Icon name={opt.icon} size={15} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[13px] font-semibold text-ink">{opt.title}</div>
+              <div className="text-[11.5px] text-muted mt-0.5 leading-relaxed">{opt.desc}</div>
+            </div>
+            {sel && <Icon name="Check" size={15} className="text-accent2 shrink-0 mt-1" strokeWidth={2.5} />}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
-  const [reasons, setReasons] = useState(settings.reasons.map((r: any, idx: number) => ({ id: idx, label: r.label, enabled: r.enabled })));
-  const [newLabel, setNewLabel] = useState('');
+function CheckList({ values, onChange, options }: { values: string[]; onChange: (v: string[]) => void; options: { value: string; label: string; hint?: string }[] }) {
+  const toggle = (v: string) => onChange(values.includes(v) ? values.filter((x) => x !== v) : [...values, v]);
+  return (
+    <div className="grid sm:grid-cols-2 gap-2">
+      {options.map((o) => (
+        <label key={o.value} className={`flex items-start gap-2.5 p-2.5 rounded-md border cursor-pointer transition ${values.includes(o.value) ? "border-accent/60 bg-accent/[0.06]" : "border-divider hover:border-[#3a3e58]"}`}>
+          <input type="checkbox" className="rf-check mt-0.5" checked={values.includes(o.value)} onChange={() => toggle(o.value)} />
+          <span>
+            <span className="block text-[13px] text-ink">{o.label}</span>
+            {o.hint && <span className="block text-[11.5px] text-muted mt-0.5">{o.hint}</span>}
+          </span>
+        </label>
+      ))}
+    </div>
+  );
+}
 
-  useEffect(() => {
-    if (actionData?.success && navigation.state === "idle" && navigation.formData?.get("intent") === "save_reasons") {
-      toast({ kind: 'success', title: 'Reasons updated' });
-    }
-  }, [actionData, navigation.state, navigation.formData]);
+function Panel({ children }: { children: ReactNode }) {
+  return <div className="bg-surface border border-border rounded-lg px-6">{children}</div>;
+}
 
-  const addReason = () => {
-    if (!newLabel.trim()) return;
-    setReasons((r: any) => [...r, { id: Date.now(), label: newLabel.trim(), enabled: true }]);
-    setNewLabel('');
-    toast({ kind: 'success', title: 'Reason added' });
-  };
-  const toggle = (id: number) => setReasons((rs: any) => rs.map((r: any) => r.id === id ? { ...r, enabled: !r.enabled } : r));
-  const del = (id: number) => { setReasons((rs: any) => rs.filter((r: any) => r.id !== id)); toast({ kind: 'info', title: 'Reason removed' }); };
+// ─── General ────────────────────────────────────────────────────────────────
 
-  const handleSave = () => {
-    const formData = new FormData();
-    formData.append("intent", "save_reasons");
-    formData.append("reasons", JSON.stringify(reasons.map((r: any) => ({ label: r.label, enabled: r.enabled }))));
-    submit(formData, { method: "POST" });
-  };
+function GeneralTab({ data }: { data: LoaderData }) {
+  const s = data.settings;
+  const f = useSettingsForm("save_general", {
+    returnWindow: s.returnWindow,
+    returnWindowBasis: s.returnWindowBasis,
+    returnAddress: s.returnAddress,
+    fromEmail: s.fromEmail,
+    notifyMerchant: s.notifyMerchant,
+    autoApprove: s.autoApprove,
+    autoExpireDays: s.autoExpireDays,
+    portalLocales: parseLocales(s.portalLocales) as string[],
+    defaultLocale: s.defaultLocale,
+    portalDisplayMode: s.portalDisplayMode,
+    autoApproveMaxAmount: s.autoApproveMaxAmount,
+    autoApproveSkipRisky: s.autoApproveSkipRisky,
+    autoRefundOnReceive: s.autoRefundOnReceive,
+    autoRefundOriginal: s.autoRefundOriginal,
+  });
+  const v = f.values;
+  const pro = data.features.automations;
+  return (
+    <Panel>
+      <SettingRow label="Return window" hint="How long customers have to request a return.">
+        <div className="flex items-center gap-3 flex-wrap">
+          <NumberField value={v.returnWindow} onChange={(n: number) => f.set("returnWindow", n)} min={1} max={365} suffix="days after" />
+          <Select value={v.returnWindowBasis} onChange={(x: string) => f.set("returnWindowBasis", x)} className="w-[190px]"
+            options={[{ value: "fulfillment", label: "fulfillment / delivery" }, { value: "order", label: "order date" }]} />
+        </div>
+      </SettingRow>
+      <SettingRow label="Return address" hint="Sent to the customer in the approval email and shown on their return page.">
+        <Textarea value={v.returnAddress} onChange={(e: any) => f.set("returnAddress", e.target.value)} rows={4} />
+      </SettingRow>
+      <SettingRow label="Reply-to email" hint="Customer replies to TrackBack emails reach this address.">
+        <Input value={v.fromEmail} onChange={(e: any) => f.set("fromEmail", e.target.value)} type="email" />
+        <div className="mt-3">
+          <Toggle checked={v.notifyMerchant} onChange={(x: boolean) => f.set("notifyMerchant", x)} label="Email me when a new request comes in" />
+        </div>
+      </SettingRow>
+      <SettingRow label="Portal languages" hint="The portal opens in the customer's store language when enabled; emails follow the language of the request.">
+        <CheckList values={v.portalLocales} onChange={(x) => f.set("portalLocales", x.length ? x : ["en"])}
+          options={SUPPORTED_LOCALES.map((l) => ({ value: l, label: LOCALE_LABELS[l] }))} />
+        <div className="mt-3 flex items-center gap-2 text-[12.5px] text-muted">
+          Default language
+          <Select value={v.defaultLocale} onChange={(x: string) => f.set("defaultLocale", x)} className="w-[150px]"
+            options={v.portalLocales.map((l: string) => ({ value: l, label: LOCALE_LABELS[l as "en" | "fr"] }))} />
+        </div>
+      </SettingRow>
+      <SettingRow label="Portal display" hint="How /apps/returns opens on your store.">
+        <ChoiceCards value={v.portalDisplayMode} onChange={(x) => f.set("portalDisplayMode", x)} options={[
+          { value: "embedded", title: "Inside my store theme", desc: "Customers stay on your domain with your header and footer. Recommended.", icon: "LayoutTemplate", color: "#22C55E" },
+          { value: "standalone", title: "Full-page portal", desc: "Opens the TrackBack page with your branding (use if your theme conflicts).", icon: "Maximize2", color: "#3B82F6" },
+        ]} />
+      </SettingRow>
+      <SettingRow label="Auto-approve returns" hint="Eligible requests are approved and the customer gets the return instructions immediately.">
+        <Toggle checked={v.autoApprove} onChange={(x: boolean) => f.set("autoApprove", x)}
+          label={v.autoApprove ? "Returns are auto-approved" : "Manual review required"} />
+        <div className={`mt-3 space-y-3 p-3 rounded-md border border-divider bg-bg/30 ${!v.autoApprove ? "opacity-60" : ""}`}>
+          <div className="flex items-center justify-between gap-2"><span className="text-[12.5px] font-semibold text-ink">Conditions</span><TierBadge tier="pro" /></div>
+          <div className={pro ? "space-y-3" : "space-y-3 opacity-50 pointer-events-none"}>
+            <div className="flex items-center gap-2 text-[12.5px] text-muted flex-wrap">
+              Only when the return value is below
+              <NumberField value={v.autoApproveMaxAmount} onChange={(n: number) => f.set("autoApproveMaxAmount", n)} min={0} step={1} width="w-28" suffix="(0 = no limit)" />
+            </div>
+            <Toggle checked={v.autoApproveSkipRisky} onChange={(x: boolean) => f.set("autoApproveSkipRisky", x)} label="Never auto-approve high-risk customers" />
+          </div>
+          {!pro && <UpgradeNotice tier="pro" />}
+        </div>
+      </SettingRow>
+      <SettingRow label="Auto-refund" hint="Refund automatically as soon as you mark the items as received." tier="pro" allowed={pro}>
+        <Toggle checked={v.autoRefundOnReceive} onChange={(x: boolean) => f.set("autoRefundOnReceive", x)} label="Store credit & exchanges: issue on receipt" />
+        <div className="mt-2">
+          <Toggle checked={v.autoRefundOriginal} onChange={(x: boolean) => f.set("autoRefundOriginal", x)} label="Also refund card payments automatically" description="Cash-on-delivery refunds always stay manual." />
+        </div>
+      </SettingRow>
+      <SettingRow label="Auto-expire approved returns" hint="Approved returns that aren't shipped in time expire and the customer is notified.">
+        <NumberField value={v.autoExpireDays} onChange={(n: number) => f.set("autoExpireDays", n)} min={1} max={90} suffix="days after approval" />
+      </SettingRow>
+      <SaveBar onSave={f.save} onDiscard={f.reset} isSaving={f.isSaving} />
+    </Panel>
+  );
+}
 
+// ─── Eligibility ────────────────────────────────────────────────────────────
+
+function EligibilityTab({ data }: { data: LoaderData }) {
+  const s = data.settings;
+  const f = useSettingsForm("save_eligibility", {
+    blockedSkus: s.blockedSkus,
+    blockedTags: s.blockedTags,
+    blockedProductTypes: s.blockedProductTypes,
+    blockDiscountedItems: s.blockDiscountedItems,
+    oneReturnPerOrder: s.oneReturnPerOrder,
+    blockedEmails: s.blockedEmails,
+    riskReturnThreshold: s.riskReturnThreshold,
+  });
+  const v = f.values;
+  return (
+    <Panel>
+      <SettingRow label="Final-sale products" hint="Items matching any of these rules are shown as “Final sale — not returnable” in the portal.">
+        <div className="space-y-3">
+          <div>
+            <label className="text-[12px] font-medium text-muted block mb-1.5">Product tags</label>
+            <Input value={v.blockedTags} onChange={(e: any) => f.set("blockedTags", e.target.value)} placeholder="final-sale, clearance" />
+          </div>
+          <div>
+            <label className="text-[12px] font-medium text-muted block mb-1.5">Product types</label>
+            <Input value={v.blockedProductTypes} onChange={(e: any) => f.set("blockedProductTypes", e.target.value)} placeholder="Underwear, Gift card" />
+          </div>
+          <div>
+            <label className="text-[12px] font-medium text-muted block mb-1.5">SKUs or product IDs</label>
+            <Textarea value={v.blockedSkus} onChange={(e: any) => f.set("blockedSkus", e.target.value)} rows={3} placeholder="SKU-001, 1234567890" />
+          </div>
+        </div>
+      </SettingRow>
+      <SettingRow label="Rules">
+        <div className="space-y-3">
+          <Toggle checked={v.blockDiscountedItems} onChange={(x: boolean) => f.set("blockDiscountedItems", x)} label="Don't accept discounted items" description="Items sold below their original price can't be returned." />
+          <Toggle checked={v.oneReturnPerOrder} onChange={(x: boolean) => f.set("oneReturnPerOrder", x)} label="One return request per order" description="Customers can't open a second request for the same order." />
+        </div>
+      </SettingRow>
+      <SettingRow label="Fraud protection" hint="Flag customers who return often and block known abusers." tier="pro" allowed={data.features.fraud}>
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-[12.5px] text-muted flex-wrap">
+            Flag a customer after
+            <NumberField value={v.riskReturnThreshold} onChange={(n: number) => f.set("riskReturnThreshold", n)} min={1} max={50} width="w-20" suffix="returns in 90 days" />
+          </div>
+          <div>
+            <label className="text-[12px] font-medium text-muted block mb-1.5">Blocked customers (emails or @domains)</label>
+            <Textarea value={v.blockedEmails} onChange={(e: any) => f.set("blockedEmails", e.target.value)} rows={3} placeholder="abuser@mail.com, @spam-domain.com" />
+          </div>
+        </div>
+      </SettingRow>
+      <SaveBar onSave={f.save} onDiscard={f.reset} isSaving={f.isSaving} />
+    </Panel>
+  );
+}
+
+// ─── Return methods & fees ──────────────────────────────────────────────────
+
+const METHOD_OPTIONS = [
+  { value: "ship", label: "Customer ships the parcel", hint: "They send it with any carrier and add the tracking number." },
+  { value: "label", label: "Prepaid label", hint: "You attach a label link when approving." },
+  { value: "store", label: "Drop-off in store", hint: "Customers bring the items to your shop." },
+  { value: "pickup", label: "Home pickup by your courier", hint: "Your delivery person collects the parcel." },
+];
+
+function MethodsTab({ data }: { data: LoaderData }) {
+  const s = data.settings;
+  const f = useSettingsForm("save_methods", {
+    returnMethods: s.returnMethodsList as string[],
+    storeDropoffInfo: s.storeDropoffInfo,
+    pickupInfo: s.pickupInfo,
+    returnShippingFee: s.returnShippingFee,
+    restockingFeePercent: s.restockingFeePercent,
+    feeWaivedForStoreCredit: s.feeWaivedForStoreCredit,
+    feeWaivedForExchange: s.feeWaivedForExchange,
+    feeExemptReasons: s.feeExemptReasons,
+  });
+  const v = f.values;
+  return (
+    <Panel>
+      <SettingRow label="Return methods" hint="Customers choose among the enabled methods in the portal.">
+        <CheckList values={v.returnMethods} onChange={(x) => f.set("returnMethods", x.length ? x : ["ship"])} options={METHOD_OPTIONS} />
+      </SettingRow>
+      {v.returnMethods.includes("store") && (
+        <SettingRow label="Store drop-off details" hint="Address and opening hours shown to the customer.">
+          <Textarea value={v.storeDropoffInfo} onChange={(e: any) => f.set("storeDropoffInfo", e.target.value)} rows={3} placeholder="Boutique Plateau — Rue 10, Dakar · Mon–Sat 9am–7pm" />
+        </SettingRow>
+      )}
+      {v.returnMethods.includes("pickup") && (
+        <SettingRow label="Pickup details" hint="What the customer should expect.">
+          <Textarea value={v.pickupInfo} onChange={(e: any) => f.set("pickupInfo", e.target.value)} rows={3} placeholder="Our courier calls you within 48h to schedule the pickup." />
+        </SettingRow>
+      )}
+      <SettingRow label="Return fees" hint="Deducted from the refund. Shown to the customer before they submit." tier="starter" allowed={data.features.returnFees}>
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-[12.5px] text-muted flex-wrap">
+            Restocking fee
+            <NumberField value={v.restockingFeePercent} onChange={(n: number) => f.set("restockingFeePercent", n)} min={0} max={100} width="w-20" suffix="% of the items" />
+          </div>
+          <div className="flex items-center gap-2 text-[12.5px] text-muted flex-wrap">
+            Return shipping fee (label & pickup)
+            <NumberField value={v.returnShippingFee} onChange={(n: number) => f.set("returnShippingFee", n)} min={0} step={0.5} width="w-28" />
+          </div>
+          <Toggle checked={v.feeWaivedForStoreCredit} onChange={(x: boolean) => f.set("feeWaivedForStoreCredit", x)} label="Waive fees for store credit" />
+          <Toggle checked={v.feeWaivedForExchange} onChange={(x: boolean) => f.set("feeWaivedForExchange", x)} label="Waive fees for exchanges" />
+          <div>
+            <label className="text-[12px] font-medium text-muted block mb-1.5">No fees for these reasons</label>
+            <Input value={v.feeExemptReasons} onChange={(e: any) => f.set("feeExemptReasons", e.target.value)} placeholder="Defective, Wrong item received" />
+          </div>
+        </div>
+      </SettingRow>
+      <SaveBar onSave={f.save} onDiscard={f.reset} isSaving={f.isSaving} />
+    </Panel>
+  );
+}
+
+// ─── Refunds & exchanges ────────────────────────────────────────────────────
+
+function RefundsTab({ data }: { data: LoaderData }) {
+  const s = data.settings;
+  const f = useSettingsForm("save_refunds", {
+    allowStoreCredit: s.allowStoreCredit,
+    storeCreditBonusPercent: s.storeCreditBonusPercent,
+    incentivizeStoreCredit: s.incentivizeStoreCredit,
+    storeCreditMethod: s.storeCreditMethod,
+    allowExchanges: s.allowExchanges,
+    allowShopNow: s.allowShopNow,
+    greenReturnsEnabled: s.greenReturnsEnabled,
+    greenReturnMaxAmount: s.greenReturnMaxAmount,
+    photosEnabled: s.photosEnabled,
+    codRefundsEnabled: s.codRefundsEnabled,
+    payoutMethods: parseList(s.payoutMethods),
+  });
+  const v = f.values;
+  const ft = data.features;
+  return (
+    <Panel>
+      <SettingRow label="Store credit" hint="Keeps the money in your store. Customers can get a bonus for choosing it." tier="starter" allowed={ft.storeCredit}>
+        <Toggle checked={v.allowStoreCredit} onChange={(x: boolean) => f.set("allowStoreCredit", x)} label="Offer store credit in the portal" />
+        {v.allowStoreCredit && (
+          <div className="mt-3 space-y-3 pl-12">
+            <div className="flex items-center gap-2 text-[12.5px] text-muted flex-wrap">
+              Bonus
+              <NumberField value={v.storeCreditBonusPercent} onChange={(n: number) => f.set("storeCreditBonusPercent", n)} min={0} max={50} width="w-20" suffix="%" />
+            </div>
+            <Toggle checked={v.incentivizeStoreCredit} onChange={(x: boolean) => f.set("incentivizeStoreCredit", x)} label="Highlight the bonus in the portal" />
+            <div>
+              <label className="text-[12px] font-medium text-muted block mb-1.5">Issue as</label>
+              <Select value={v.storeCreditMethod} onChange={(x: string) => f.set("storeCreditMethod", x)} className="w-[320px]" options={[
+                { value: "auto", label: "Store credit, or gift card for guest orders" },
+                { value: "store_credit", label: "Shopify store credit only" },
+                { value: "gift_card", label: "Gift card code (works without an account)" },
+              ]} />
+            </div>
+          </div>
+        )}
+      </SettingRow>
+      <SettingRow label="Exchanges" hint="Customers pick the replacement size/color themselves; stock is checked live." tier="starter" allowed={ft.variantExchange}>
+        <Toggle checked={v.allowExchanges} onChange={(x: boolean) => f.set("allowExchanges", x)} label="Offer variant exchanges" />
+        <div className={`mt-3 ${ft.shopNow ? "" : "opacity-60"}`}>
+          <div className="flex items-center gap-2">
+            <Toggle checked={v.allowShopNow} onChange={(x: boolean) => ft.shopNow && f.set("allowShopNow", x)} label="Shop Now: exchange for any product" />
+            <TierBadge tier="pro" />
+          </div>
+        </div>
+      </SettingRow>
+      <SettingRow label="Green returns" hint="Refund low-value items without asking for them back — cheaper than paying for shipping." tier="starter" allowed={ft.greenReturns}>
+        <Toggle checked={v.greenReturnsEnabled} onChange={(x: boolean) => f.set("greenReturnsEnabled", x)} label="Let customers keep low-value items" />
+        {v.greenReturnsEnabled && (
+          <div className="mt-3 pl-12 flex items-center gap-2 text-[12.5px] text-muted flex-wrap">
+            When the return value is at most
+            <NumberField value={v.greenReturnMaxAmount} onChange={(n: number) => f.set("greenReturnMaxAmount", n)} min={0} step={1} width="w-28" />
+          </div>
+        )}
+      </SettingRow>
+      <SettingRow label="Photo evidence" hint="Customers can attach up to 3 photos per item. Make them mandatory per reason in the Reasons tab." tier="starter" allowed={ft.photos}>
+        <Toggle checked={v.photosEnabled} onChange={(x: boolean) => f.set("photosEnabled", x)} label="Allow photos on every return" />
+      </SettingRow>
+      <SettingRow label="Cash-on-delivery refunds" hint="For orders paid on delivery, customers tell you where to send the refund. You pay them, then record the payout in TrackBack.">
+        <Toggle checked={v.codRefundsEnabled} onChange={(x: boolean) => f.set("codRefundsEnabled", x)} label="Collect mobile money / bank details in the portal" />
+        {v.codRefundsEnabled && (
+          <div className="mt-3">
+            <CheckList values={v.payoutMethods} onChange={(x) => f.set("payoutMethods", x)} options={PAYOUT_METHODS.map((p) => ({ value: p.key, label: p.label.en }))} />
+          </div>
+        )}
+      </SettingRow>
+      <SaveBar onSave={f.save} onDiscard={f.reset} isSaving={f.isSaving} />
+    </Panel>
+  );
+}
+
+// ─── Reasons ────────────────────────────────────────────────────────────────
+
+function ReasonsTab({ data }: { data: LoaderData }) {
+  const can = data.features.customReasons;
+  const photos = data.features.photos;
+  const initial = data.settings.reasons.map((r: any, idx: number) => ({ id: idx, label: r.label, enabled: r.enabled, requirePhoto: r.requirePhoto }));
+  const f = useSettingsForm("save_reasons", { reasons: initial });
+  const [newLabel, setNewLabel] = useState("");
+  const reasons = f.values.reasons;
+  const update = (id: number, patch: any) => f.set("reasons", reasons.map((r: any) => (r.id === id ? { ...r, ...patch } : r)));
   return (
     <div className="bg-surface border border-border rounded-lg p-6">
-      {!isPro && (
-        <div className="flex items-center gap-3 p-4 mb-5 rounded-xl border border-[#8B5CF6]/30 bg-[#8B5CF6]/8">
-          <Icon name="Lock" size={15} style={{ color: '#8B5CF6' }} className="shrink-0" />
-          <p className="text-[12.5px] text-ink flex-1">
-            <span className="font-semibold">Custom return reasons require the Pro plan.</span>
-            {" "}Upgrade to add, remove, and customize return reasons.
-          </p>
-          <Link to={billingHref}
-            className="shrink-0 h-7 px-3 rounded-md text-[12px] font-semibold text-white flex items-center gap-1"
-            style={{ background: '#8B5CF6' }}>
-            Upgrade <Icon name="ArrowRight" size={12} />
-          </Link>
-        </div>
-      )}
-
+      {!can && <div className="mb-5"><UpgradeNotice tier={requiredTier("customReasons")}>Add, rename and remove reasons with the Starter plan.</UpgradeNotice></div>}
       <div className="flex items-start justify-between mb-4 flex-wrap gap-3">
         <div>
           <div className="text-[14px] font-semibold text-ink">Return reasons</div>
-          <div className="text-[12.5px] text-muted mt-1">Customers pick one of these when filing a return.</div>
+          <div className="text-[12.5px] text-muted mt-1">Customers pick one of these for each item.{photos ? " Require a photo for the reasons that need proof." : ""}</div>
         </div>
       </div>
-
-      <div className="space-y-1.5">
+      <div className={`space-y-1.5 ${can ? "" : "opacity-60 pointer-events-none"}`}>
         {reasons.map((r: any) => (
           <div key={r.id} className="flex items-center gap-3 py-2.5 px-3 rounded-md bg-bg/30 border border-divider group">
-            <Icon name="GripVertical" size={14} className="text-faint cursor-grab" />
-            <div className={`flex-1 text-[13.5px] ${r.enabled ? 'text-ink' : 'text-faint line-through'}`}>{r.label}</div>
-            <Toggle checked={r.enabled} onChange={() => isPro && toggle(r.id)} disabled={!isPro} />
-            <button onClick={() => isPro && del(r.id)} disabled={!isPro} className="p-1.5 rounded text-faint hover:text-danger hover:bg-danger/10 transition opacity-0 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30">
+            <Icon name="GripVertical" size={14} className="text-faint" />
+            <input value={r.label} onChange={(e) => update(r.id, { label: e.target.value })}
+              className={`flex-1 bg-transparent text-[13.5px] focus:outline-none ${r.enabled ? "text-ink" : "text-faint line-through"}`} />
+            {photos && (
+              <label className="flex items-center gap-1.5 text-[11.5px] text-muted cursor-pointer" title="Customers must add a photo">
+                <input type="checkbox" className="rf-check" checked={!!r.requirePhoto} onChange={() => update(r.id, { requirePhoto: !r.requirePhoto })} />
+                <Icon name="Camera" size={12} /> Photo
+              </label>
+            )}
+            <Toggle checked={r.enabled} onChange={() => update(r.id, { enabled: !r.enabled })} />
+            <button onClick={() => f.set("reasons", reasons.filter((x: any) => x.id !== r.id))}
+              className="p-1.5 rounded text-faint hover:text-danger hover:bg-danger/10 transition opacity-0 group-hover:opacity-100">
               <Icon name="Trash2" size={14} />
             </button>
           </div>
         ))}
       </div>
-
-      <div className="mt-5 pt-5 border-t border-divider flex items-center gap-2">
-        <Input value={newLabel} onChange={(e: any) => isPro && setNewLabel(e.target.value)}
-          onKeyDown={(e: any) => e.key === 'Enter' && isPro && addReason()}
-          placeholder={isPro ? "e.g. Item not as pictured" : "Pro plan required"} className="flex-1"
-          disabled={!isPro} />
-        <Btn variant="secondary" icon="Plus" onClick={addReason} disabled={!newLabel.trim() || !isPro}>Add Custom Reason</Btn>
+      <div className={`mt-5 pt-5 border-t border-divider flex items-center gap-2 ${can ? "" : "opacity-60 pointer-events-none"}`}>
+        <Input value={newLabel} onChange={(e: any) => setNewLabel(e.target.value)} placeholder="e.g. Item not as pictured" className="flex-1"
+          onKeyDown={(e: any) => { if (e.key === "Enter" && newLabel.trim()) { f.set("reasons", [...reasons, { id: Date.now(), label: newLabel.trim(), enabled: true, requirePhoto: false }]); setNewLabel(""); } }} />
+        <Btn variant="secondary" icon="Plus" disabled={!newLabel.trim()}
+          onClick={() => { f.set("reasons", [...reasons, { id: Date.now(), label: newLabel.trim(), enabled: true, requirePhoto: false }]); setNewLabel(""); }}>Add reason</Btn>
       </div>
-
-      <div className="pt-6 border-t border-divider mt-6"><SaveBar onSave={handleSave} onDiscard={() => setReasons(settings.reasons.map((r: any, idx: number) => ({ id: idx, label: r.label, enabled: r.enabled })))} isSaving={isSaving} disabled={!isPro} /></div>
+      <SaveBar onSave={f.save} onDiscard={f.reset} isSaving={f.isSaving} disabled={!can} />
     </div>
   );
 }
 
+// ─── Policy & EU withdrawal ─────────────────────────────────────────────────
+
+function PolicyTab({ data }: { data: LoaderData }) {
+  const f = useSettingsForm("save_policy", { returnPolicy: data.settings.returnPolicy, euWithdrawalEnabled: data.settings.euWithdrawalEnabled });
+  const v = f.values;
+  return (
+    <div className="bg-surface border border-border rounded-lg p-6 space-y-6">
+      <div>
+        <div className="flex items-start justify-between mb-3 gap-4 flex-wrap">
+          <div>
+            <div className="text-[14px] font-semibold text-ink">Return policy</div>
+            <div className="text-[12.5px] text-muted mt-1">Shown in the portal (“Read our return policy”) and accepted by the customer when submitting.</div>
+          </div>
+          <div className="text-[11.5px] text-muted flex items-center gap-1.5">
+            <Icon name="Eye" size={12} /> {v.returnPolicy.length} characters
+          </div>
+        </div>
+        <Textarea value={v.returnPolicy} onChange={(e: any) => f.set("returnPolicy", e.target.value)} rows={12} className="leading-relaxed" />
+      </div>
+      <div className="p-4 rounded-md border border-divider bg-bg/30">
+        <Toggle checked={v.euWithdrawalEnabled} onChange={(x: boolean) => f.set("euWithdrawalEnabled", x)}
+          label="EU withdrawal button (“Withdraw from contract here”)"
+          description="Required since 19 June 2026 when you sell to consumers in the EU: a 2-step withdrawal flow reachable without logging in, with an immediate acknowledgment email." />
+        {v.euWithdrawalEnabled && (
+          <div className="mt-3 pl-12 text-[12px] text-muted leading-relaxed">
+            Add a footer link named “Withdraw from contract here” / « Se rétracter du contrat ici » pointing to{" "}
+            <span className="font-mono text-ink">/apps/returns?mode=withdraw</span> (see the Portal tab).
+          </div>
+        )}
+      </div>
+      <SaveBar onSave={f.save} onDiscard={f.reset} isSaving={f.isSaving} />
+    </div>
+  );
+}
+
+// ─── Notifications ──────────────────────────────────────────────────────────
+
+function NotificationsTab({ data }: { data: LoaderData }) {
+  const s = data.settings;
+  const f = useSettingsForm("save_notifications", {
+    weeklyReportEnabled: s.weeklyReportEnabled,
+    orderTagsEnabled: s.orderTagsEnabled,
+    whatsappNumber: s.whatsappNumber,
+    whatsappNotifyEnabled: s.whatsappNotifyEnabled,
+    whatsappPhoneNumberId: s.whatsappPhoneNumberId,
+    whatsappTemplateName: s.whatsappTemplateName,
+    whatsappTemplateLang: s.whatsappTemplateLang,
+    whatsappAccessToken: "",
+  });
+  const v = f.values;
+  const ft = data.features;
+  return (
+    <Panel>
+      <SettingRow label="WhatsApp" hint="Customers can contact you on WhatsApp from their return page, and you can message them in one click from each return." tier="pro" allowed={ft.whatsapp}>
+        <label className="text-[12px] font-medium text-muted block mb-1.5">Your WhatsApp Business number (international format)</label>
+        <Input value={v.whatsappNumber} onChange={(e: any) => f.set("whatsappNumber", e.target.value)} placeholder="+221 77 123 45 67" />
+        <div className="mt-4 p-3 rounded-md border border-divider bg-bg/30 space-y-3">
+          <Toggle checked={v.whatsappNotifyEnabled} onChange={(x: boolean) => f.set("whatsappNotifyEnabled", x)}
+            label="Automatic WhatsApp updates (Meta Cloud API)"
+            description="Customers who opt in receive status updates. Requires a WhatsApp Business account and an approved utility template with 3 variables: {{1}} name, {{2}} return number, {{3}} update." />
+          {v.whatsappNotifyEnabled && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[12px] font-medium text-muted block mb-1.5">Phone number ID</label>
+                <Input value={v.whatsappPhoneNumberId} onChange={(e: any) => f.set("whatsappPhoneNumberId", e.target.value)} />
+              </div>
+              <div>
+                <label className="text-[12px] font-medium text-muted block mb-1.5">Template name</label>
+                <Input value={v.whatsappTemplateName} onChange={(e: any) => f.set("whatsappTemplateName", e.target.value)} placeholder="return_update" />
+              </div>
+              <div>
+                <label className="text-[12px] font-medium text-muted block mb-1.5">Template language</label>
+                <Input value={v.whatsappTemplateLang} onChange={(e: any) => f.set("whatsappTemplateLang", e.target.value)} placeholder="fr" />
+              </div>
+              <div>
+                <label className="text-[12px] font-medium text-muted block mb-1.5">Access token {s.hasWhatsappToken && <span className="text-ok">(saved)</span>}</label>
+                <Input value={v.whatsappAccessToken} onChange={(e: any) => f.set("whatsappAccessToken", e.target.value)} type="password" placeholder={s.hasWhatsappToken ? "Leave empty to keep" : "EAAG…"} />
+              </div>
+            </div>
+          )}
+        </div>
+      </SettingRow>
+      <SettingRow label="Weekly report" hint="Every Monday: returns, refunds, retained revenue and top reasons of the past week." tier="starter" allowed={ft.weeklyReport}>
+        <Toggle checked={v.weeklyReportEnabled} onChange={(x: boolean) => f.set("weeklyReportEnabled", x)} label="Email me a weekly summary" />
+      </SettingRow>
+      <SettingRow label="Shopify order tags" hint="Tag orders with trackback-return, trackback-exchange, trackback-refunded… to filter them in Shopify." tier="starter" allowed={ft.orderTags}>
+        <Toggle checked={v.orderTagsEnabled} onChange={(x: boolean) => f.set("orderTagsEnabled", x)} label="Tag orders automatically" />
+      </SettingRow>
+      <SaveBar onSave={f.save} onDiscard={f.reset} isSaving={f.isSaving} />
+    </Panel>
+  );
+}
+
+// ─── Integrations (webhooks + API) ──────────────────────────────────────────
+
+function IntegrationsTab({ data }: { data: LoaderData }) {
+  const s = data.settings;
+  const fetcher = useFetcher<typeof action>();
+  const toast = useToast();
+  const [url, setUrl] = useState(s.webhookUrl);
+  const [newKey, setNewKey] = useState<string | null>(null);
+  const [showSecret, setShowSecret] = useState(false);
+  const busy = fetcher.state !== "idle";
+  const run = (intent: string, payload: Record<string, unknown> = {}) =>
+    fetcher.submit({ intent, data: JSON.stringify(payload) }, { method: "POST" });
+
+  useEffect(() => {
+    const d = fetcher.data as any;
+    if (fetcher.state !== "idle" || !d) return;
+    if (d.apiKey) setNewKey(d.apiKey);
+    if (d.ok) toast({ kind: "success", title: d.intent === "test_webhook" ? "Test delivered" : "Saved" });
+    else toast({ kind: "error", title: "Failed", body: d.error });
+  }, [fetcher.state, fetcher.data, toast]);
+
+  return (
+    <Panel>
+      <SettingRow label="Webhooks" hint="We POST return events (created, approved, shipped, received, refunded…) signed with HMAC-SHA256." tier="pro" allowed={data.features.webhooks}>
+        <div className="flex gap-2">
+          <Input value={url} onChange={(e: any) => setUrl(e.target.value)} placeholder="https://example.com/webhooks/trackback" className="flex-1" />
+          <Btn variant="primary" disabled={busy} onClick={() => run("save_webhook", { webhookUrl: url })}>Save</Btn>
+        </div>
+        {s.webhookSecret && (
+          <div className="mt-3 space-y-2 text-[12.5px]">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-muted">Signing secret</span>
+              <span className="font-mono text-ink bg-bg px-2 py-1 rounded">{showSecret ? s.webhookSecret : "whsec_••••••••••••"}</span>
+              <button className="text-accent2 text-[12px]" onClick={() => setShowSecret((x) => !x)}>{showSecret ? "Hide" : "Reveal"}</button>
+              <button className="text-muted text-[12px] hover:text-ink" onClick={() => run("rotate_webhook_secret")}>Rotate</button>
+            </div>
+            <div className="flex items-center gap-2">
+              <Btn variant="secondary" size="sm" icon="Send" disabled={busy || !s.webhookUrl} onClick={() => run("test_webhook")}>Send test event</Btn>
+              {s.webhookLastStatus && <span className="text-muted">Last: {s.webhookLastStatus}</span>}
+            </div>
+          </div>
+        )}
+      </SettingRow>
+      <SettingRow label="REST API" hint="Read your returns from your ERP, WMS or spreadsheet." tier="pro" allowed={data.features.api}>
+        {newKey ? (
+          <div className="p-3 rounded-md border border-ok/30 bg-ok/10 text-[12.5px] space-y-1.5">
+            <div className="font-semibold text-ink">Copy your key now — it won't be shown again.</div>
+            <div className="font-mono text-ink break-all">{newKey}</div>
+          </div>
+        ) : s.hasApiKey ? (
+          <div className="text-[12.5px] text-muted">Active key: <span className="font-mono text-ink">{s.apiKeyPrefix}…</span></div>
+        ) : (
+          <div className="text-[12.5px] text-muted">No API key yet.</div>
+        )}
+        <div className="mt-3 flex items-center gap-2">
+          <Btn variant="secondary" size="sm" icon="KeyRound" disabled={busy} onClick={() => run("generate_api_key")}>{s.hasApiKey ? "Regenerate key" : "Generate key"}</Btn>
+          {s.hasApiKey && <Btn variant="ghost" size="sm" disabled={busy} onClick={() => run("revoke_api_key")}>Revoke</Btn>}
+        </div>
+        <pre className="mt-3 p-3 rounded-md bg-[#0f1117] text-[#e2e8f0] font-mono text-[11.5px] overflow-x-auto">{`curl ${data.appUrl}/api/v1/returns?status=PENDING \\
+  -H "Authorization: Bearer tb_live_…"`}</pre>
+      </SettingRow>
+    </Panel>
+  );
+}
+
 // ---- Portal Access tab ----
-function PortalAccessTab({ shop, appUrl, apiKey }: { shop: string; appUrl: string; apiKey: string }) {
+function PortalAccessTab({ shop, appUrl, apiKey, withdrawal }: { shop: string; appUrl: string; apiKey: string; withdrawal: boolean }) {
   const [copied, setCopied] = useState<string | null>(null);
 
   const proxyUrl = `https://${shop}/apps/returns`;
+  const withdrawalUrl = `https://${shop}/apps/returns?mode=withdraw`;
+  const trackUrl = `https://${shop}/apps/returns?mode=status`;
   const directUrl = `${appUrl}/portal?shop=${shop}`;
   const iframeCode = `<iframe\n  src="${directUrl}"\n  width="100%"\n  height="700"\n  frameborder="0"\n  style="border:none;border-radius:12px;"\n></iframe>`;
 
@@ -635,6 +1004,30 @@ function PortalAccessTab({ shop, appUrl, apiKey }: { shop: string; appUrl: strin
             copied={copied}
             onCopy={copy}
           />
+          <UrlCard
+            label="Track a return"
+            badge="Status page"
+            badgeTone="blue"
+            tagline="Customers look up an existing return and add their tracking number."
+            url={trackUrl}
+            urlScheme="https://"
+            copyKey="track"
+            copied={copied}
+            onCopy={copy}
+          />
+          {withdrawal && (
+            <UrlCard
+              label="Withdraw from contract (EU)"
+              badge="Legal"
+              badgeTone="green"
+              tagline="Link it in your footer as “Withdraw from contract here” / « Se rétracter du contrat ici »."
+              url={withdrawalUrl}
+              urlScheme="https://"
+              copyKey="withdraw"
+              copied={copied}
+              onCopy={copy}
+            />
+          )}
         </div>
       </SectionShell>
 
@@ -860,42 +1253,3 @@ function CodeCard({ tabLabel, tabColor, badge, badgeTone, description, code, lan
   );
 }
 
-// ---- Policy tab ----
-function PolicyTab({ settings }: any) {
-  const submit = useSubmit();
-  const navigation = useNavigation();
-  const toast = useToast();
-  const isSaving = navigation.state === "submitting" && navigation.formData?.get("intent") === "save_policy";
-  const actionData = useActionData<typeof action>();
-
-  const [policy, setPolicy] = useState(settings.returnPolicy);
-
-  useEffect(() => {
-    if (actionData?.success && navigation.state === "idle" && navigation.formData?.get("intent") === "save_policy") {
-      toast({ kind: 'success', title: 'Policy updated' });
-    }
-  }, [actionData, navigation.state, navigation.formData]);
-
-  const handleSave = () => {
-    const formData = new FormData();
-    formData.append("intent", "save_policy");
-    formData.append("returnPolicy", policy);
-    submit(formData, { method: "POST" });
-  };
-
-  return (
-    <div className="bg-surface border border-border rounded-lg p-6">
-      <div className="flex items-start justify-between mb-3 gap-4 flex-wrap">
-        <div>
-          <div className="text-[14px] font-semibold text-ink">Return policy</div>
-          <div className="text-[12.5px] text-muted mt-1">Shown on the customer portal and linked in confirmation emails.</div>
-        </div>
-        <div className="text-[11.5px] text-muted flex items-center gap-1.5">
-          <Icon name="Eye" size={12} /> {policy.length} characters · {policy.split(/\s+/).filter(Boolean).length} words
-        </div>
-      </div>
-      <Textarea value={policy} onChange={(e: any) => setPolicy(e.target.value)} rows={14} className="leading-relaxed" />
-      <SaveBar onSave={handleSave} onDiscard={() => setPolicy(settings.returnPolicy)} isSaving={isSaving} />
-    </div>
-  );
-}

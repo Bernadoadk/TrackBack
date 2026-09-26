@@ -4,30 +4,11 @@ import { useLoaderData, useFetcher } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { PageHeader, Card, Btn, Icon, useToast } from "../components/ui";
-import { isBillingTestMode, syncBillingFromShopify } from "../lib/plan.server";
+import { ensureBillingSynced, isBillingTestMode } from "../lib/plan.server";
+import { ANNUAL_DISCOUNT_PCT, PLANS as PLAN_CATALOGUE } from "../lib/plans";
 
-// 20% discount on annual plans (2.4 months free)
-const ANNUAL_DISCOUNT_PCT = 20;
-
-const PLANS = [
-  {
-    id: 'free', name: 'Free', price: 0, unit: 'forever', monthlyLimit: 10,
-    summary: '10 returns / month',
-    features: ['Customer return portal', 'Email notifications', 'Basic analytics', 'Up to 10 returns/month'],
-  },
-  {
-    id: 'starter', name: 'Starter', price: 19, unit: 'month', monthlyLimit: 100, popular: true,
-    annualId: 'starter_annual', annualName: 'Starter Annual', annualPrice: 182,
-    summary: '100 returns / month',
-    features: ['Everything in Free', 'Custom branding & logo', 'Advanced analytics', 'Email templates', 'Priority support'],
-  },
-  {
-    id: 'pro', name: 'Pro', price: 49, unit: 'month', monthlyLimit: 999999,
-    annualId: 'pro_annual', annualName: 'Pro Annual', annualPrice: 470,
-    summary: 'Unlimited returns',
-    features: ['Everything in Starter', 'Live chat with customers', 'API access & webhooks', 'Custom return reasons', 'White-label portal', 'Dedicated CSM'],
-  },
-];
+// Plans, prices and features come from the shared catalogue (app/lib/plans.ts).
+const PLANS = PLAN_CATALOGUE;
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
@@ -37,7 +18,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // mirrors them into the local DB, so the page always reflects reality
   // whether the user just approved, declined, cancelled, or never visited
   // the approval URL at all.
-  const resolvedPlan = await syncBillingFromShopify(admin, shop);
+  const resolvedPlan = await ensureBillingSynced(admin, shop, { force: true });
 
   // Detect "just activated" (charge_id in URL + we now have a paid plan) so
   // we can fire a one-time success toast.
@@ -456,7 +437,7 @@ export default function BillingPage() {
       </div>
 
       <div className="mt-8 p-5 rounded-lg border border-divider bg-bg/30 flex items-start gap-3">
-        <Icon name="MessageCircleQuestion" size={18} className="text-accent2 mt-0.5 shrink-0" />
+        <Icon name="MessageCircleQuestionMark" size={18} className="text-accent2 mt-0.5 shrink-0" />
         <div className="flex-1">
           <div className="text-[13.5px] font-semibold text-ink">Questions about pricing?</div>
           <div className="text-[12.5px] text-muted mt-0.5">Chat with our team — we usually reply within an hour.</div>

@@ -1,57 +1,35 @@
-import nodemailer from "nodemailer";
 import prisma from "../db.server";
+import { isRealEmail, sendPlainEmail } from "./mailer.server";
 
-// Seed placeholder used during onboarding — must NOT be used as a real
-// destination, the domain has no MX records and Gmail bounces every delivery.
-const PLACEHOLDER_FROM_EMAIL = "returns@acmestore.com";
-const isRealEmail = (v?: string | null) =>
-  !!v && v !== PLACEHOLDER_FROM_EMAIL && /.+@.+\..+/.test(v);
-
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || "smtp.gmail.com",
-  port: parseInt(process.env.SMTP_PORT || "587"),
-  secure: process.env.SMTP_PORT === "465",
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
-
+/** Email the merchant that a customer wrote in the portal chat. */
 export async function sendChatEmail(params: {
   shop: string;
-  to: string;
   customerName: string;
   customerEmail: string;
   bodyPreview: string;
 }) {
-  const settings = await prisma.shopSettings.findUnique({
-    where: { shop: params.shop },
-  });
-  const merchantEmail = isRealEmail(settings?.fromEmail)
-    ? settings!.fromEmail!
-    : process.env.SMTP_USER;
+  const settings = await prisma.shopSettings.findUnique({ where: { shop: params.shop } });
+  const merchantEmail = isRealEmail(settings?.fromEmail) ? settings!.fromEmail : null;
   if (!merchantEmail) {
-    console.warn("[chat] no merchant email configured (fromEmail is placeholder and SMTP_USER missing); skipping notification");
+    console.warn("[chat] no merchant email configured; skipping offline notification");
     return false;
   }
 
-  const adminUrl = (process.env.SHOPIFY_APP_URL?.replace(/\/$/, "") ?? "") +
-    "/app/messages";
+  const apiKey = process.env.SHOPIFY_API_KEY ?? "";
+  const inboxUrl = apiKey
+    ? `https://${params.shop}/admin/apps/${apiKey}/app/messages`
+    : `${(process.env.SHOPIFY_APP_URL ?? "").replace(/\/$/, "")}/app/messages`;
+  const fr = settings?.defaultLocale === "fr";
 
-  try {
-    const info = await transporter.sendMail({
-      from: `"TrackBack Chat" <${process.env.SMTP_USER}>`,
-      to: merchantEmail,
-      subject: `💬 New message from ${params.customerName}`,
-      text:
-        `${params.customerName} (${params.customerEmail}) just sent you a message:\n\n` +
-        `"${params.bodyPreview}"\n\n` +
-        `Reply in your TrackBack inbox: ${adminUrl}\n`,
-    });
-    console.log("[chat] notify email sent:", info.messageId);
-    return true;
-  } catch (e) {
-    console.error("[chat] notify email failed:", e);
-    return false;
-  }
+  return sendPlainEmail({
+    to: merchantEmail,
+    fromName: "TrackBack",
+    replyTo: params.customerEmail,
+    subject: fr
+      ? `💬 Nouveau message de ${params.customerName}`
+      : `💬 New message from ${params.customerName}`,
+    text: fr
+      ? `${params.customerName} (${params.customerEmail}) vous a écrit :\n\n"${params.bodyPreview}"\n\nRépondre depuis TrackBack : ${inboxUrl}\n`
+      : `${params.customerName} (${params.customerEmail}) just sent you a message:\n\n"${params.bodyPreview}"\n\nReply in your TrackBack inbox: ${inboxUrl}\n`,
+  });
 }

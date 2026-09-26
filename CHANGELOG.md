@@ -1,127 +1,79 @@
-# @shopify/shopify-app-template-react-router
+# Changelog — TrackBack
 
-## 2026.02.09
-- Add declarative product metafield definition and demonstrate metafield usage in the product creation flow
-- Add declarative metaobject definition and demonstrate metaobject upsert in the product creation flow
+## 2026-09-26 — Portail bilingue, nouvelles résolutions et fonctionnalités par plan
 
-## 2026.01.08
-- [#170](https://github.com/Shopify/shopify-app-template-react-router/pull/170) - Update React Router minimum version to v7.12.0
+### Ajouts
 
-## 2025.12.11
+**Portail client**
+- Portail bilingue anglais / français qui suit la langue de la boutique, textes personnalisables par langue.
+- Portail affiché dans le thème de la boutique via l'App Proxy (`/apps/returns`), avec option pleine page.
+- Page de suivi du retour (`?mode=status`) : chronologie, instructions de retour, saisie du numéro de suivi ; liée dans chaque e-mail.
+- Bouton de rétractation UE (`?mode=withdraw`, directive 2023/2673) : parcours en 2 étapes sans compte et accusé de réception immédiat.
+- Nouveaux modes de retour : dépôt en boutique et enlèvement par coursier, en plus de l'envoi par le client et de l'étiquette prépayée.
+- Photos (jusqu'à 3 par article), obligatoires selon le motif (Starter+).
+- Frais et bonus affichés avant validation ; le serveur recalcule tout.
 
-- [#151](https://github.com/Shopify/shopify-app-template-react-router/pull/151) Update `@shopify/shopify-app-react-router` to v1.1.0 and `@shopify/shopify-app-session-storage-prisma` to v8.0.0, add refresh token fields (`refreshToken` and `refreshTokenExpires`) to Session model in Prisma schema, and adopt the `expiringOfflineAccessTokens` flag for enhanced security through token rotation. See [expiring vs non-expiring offline tokens](https://shopify.dev/docs/apps/build/authentication-authorization/access-tokens/offline-access-tokens#expiring-vs-non-expiring-offline-tokens) for more information.
+**Résolutions**
+- Remboursement des commandes payées à la livraison : le client indique son compte (Wave, Orange Money, MTN MoMo, Moov Money, M-Pesa, Airtel Money, virement, espèces) et le marchand enregistre le paiement avec sa référence ; Shopify enregistre le remboursement.
+- Cartes-cadeaux Shopify (Starter+), utilisées automatiquement à la place de l'avoir pour les commandes sans compte client.
+- Échanges en libre-service (Starter+) : le client choisit lui-même la taille ou la couleur, stock vérifié en direct.
+- Shop Now (Pro) : échange contre n'importe quel produit de la boutique.
+- Retours verts (Starter+) : sous un montant défini, le client garde l'article.
+- Frais de restockage et de retour (Starter+), exemptions par motif, frais offerts pour les avoirs et échanges.
 
-## 2025.10.10
+**Opérations**
+- Automatisations (Pro) : conditions d'auto-approbation (montant maximum, clients à risque exclus), remboursement automatique à réception.
+- Score de risque et liste noire de clients (Pro).
+- WhatsApp (Pro) : bouton sur la page de suivi, message prêt à envoyer sur chaque retour, notifications automatiques via l'API Cloud de Meta.
+- Export CSV des retours filtrés.
+- Tâche quotidienne : expiration des retours non expédiés, rapport hebdomadaire du lundi (Starter+), purge du rate limiting.
+- Tags de commandes Shopify (Starter+) : `trackback-return`, `trackback-exchange`, `trackback-refunded`…
 
-- [#95](https://github.com/Shopify/shopify-app-template-react-router/pull/95) Swap the product link for [admin intents](https://shopify.dev/docs/apps/build/admin/admin-intents).
+**E-mails et analytics**
+- 8 e-mails en anglais et en français (nouveaux : « Reçu », « Expiré », « Rétractation reçue »), envoyés dans la langue du client, réponses vers l'e-mail du marchand.
+- Nouvelles variables : `{{return_instructions}}`, `{{refund_details}}`, `{{status_url}}`, `{{items_list}}`…
+- Analytics : taux de retour (comparé aux commandes Shopify), répartition des résolutions, frais encaissés.
 
-## 2025.10.02
+**Intégrations (Pro)**
+- Webhooks sortants signés HMAC-SHA256 (`return.created` … `return.expired`) avec événement de test.
+- API REST v1 : `GET /api/v1/returns`, `GET /api/v1/returns/{rma}`, clés stockées hachées.
 
-- [#81](https://github.com/Shopify/shopify-app-template-react-router/pull/81) Add shopify global to eslint for ui extensions
+### Améliorations
+- Réglages réorganisés en 9 onglets : Général, Éligibilité, Retours et frais, Remboursements, Motifs, Politique, Notifications, Intégrations, Portail.
+- Fonctionnalités réparties par plan depuis une source unique (`app/lib/plans.ts`), avec badges et invitations à passer au plan supérieur.
+- Actions groupées : mêmes e-mails et synchronisations Shopify que les actions unitaires.
+- Fenêtre de retour calculée depuis l'expédition (ou la date de commande, au choix).
+- Règles « non retournable » exactes (SKU, tags, types de produits) : plus de blocage par sous-chaîne.
+- Tableau de bord : rétractations UE en attente et retours à risque.
+- Montants formatés selon la langue du client dans le portail et les e-mails.
+- Pages plus légères : le chunk JavaScript partagé (portail inclus) passe de 803 kB à 73 kB grâce à un registre explicite des icônes (`app/components/icon-registry.ts`).
+- Documentation intégrée (`/app/docs`) réécrite ; nouvelles sections Remboursements, Analytics, Webhooks et API.
+- Index de base de données sur les requêtes fréquentes.
 
-## 2025.10.01
+### Corrections
+- Les plans annuels étaient traités comme Free à plusieurs endroits.
+- La synchronisation Shopify pouvait faire reculer le statut d'un retour (webhook tardif).
+- Remise en stock silencieusement en échec (scope `read_locations` manquant).
+- Double remboursement possible en cas de double clic ou d'action simultanée.
+- Webhooks RGPD traités sans attendre la fin ; l'export RGPD inclut désormais paiements, photos et chat.
+- Suppression d'images Cloudinary possible hors du dossier de la boutique.
+- Icônes invisibles dans l'admin et le portail (indicateurs de chargement, alertes, éditeur).
+- Portail intégré en iframe bloqué par la politique `frame-ancestors` ; thème clair forcé dans le portail.
 
-- [#79](https://github.com/Shopify/shopify-app-template-react-router/pull/78) Update API version to 2025-10.
-- [#77](https://github.com/Shopify/shopify-app-template-react-router/pull/77) Update `@shopify/shopify-app-react-router` to V1.
-- [#73](https://github.com/Shopify/shopify-app-template-react-router/pull/73/files) Rename @shopify/app-bridge-ui-types to @shopify/polaris-types
+### Sécurité
+- Sessions du portail, du chat et des liens de suivi signées (HMAC) ; plus d'écriture avec `?shop=` seul.
+- Revalidation serveur de l'éligibilité, des quantités, des frais et des montants.
+- Recherche de commande protégée contre l'injection de syntaxe de recherche.
+- Rate limiting en base sur les endpoints publics ; comparaisons de secrets en temps constant.
 
-## 2025.08.30
+### Technique
+- Logique métier pure (`returns-logic.ts`) couverte par Vitest ; CI GitHub Actions (typecheck, tests, build).
+- Service unique pour toutes les transitions de statut (`returns-service.server.ts`).
+- Build Vercel sans `--accept-data-loss` : un changement de schéma destructif fait échouer le build au lieu de supprimer des données.
+- `.env.example` et README réécrits ; suppression de la page d'exemple du template (`app.additional.tsx`).
 
-- [#70](https://github.com/Shopify/shopify-app-template-react-router/pull/70/files) Upgrade `@shopify/app-bridge-ui-types` from 0.2.1 to 0.3.1.
-
-## 2025.08.17
-
-- [#58](https://github.com/Shopify/shopify-app-template-react-router/pull/58) Update Shopify & React Router dependencies.  Use Shopify React Router in graphqlrc, not shopify-api
-- [#57](https://github.com/Shopify/shopify-app-template-react-router/pull/57) Update Webhook API version in `shopify.app.toml` to `2025-07`
-- [#56](https://github.com/Shopify/shopify-app-template-react-router/pull/56) Remove local CLI from package.json in favor of global CLI installation
-- [#53](https://github.com/Shopify/shopify-app-template-react-router/pull/53) Add the Shopify Dev MCP to the template
-
-## 2025.08.16
-
-- [#52](https://github.com/Shopify/shopify-app-template-react-router/pull/52) Use `ApiVersion.July25` rather than `LATEST_API_VERSION` in `.graphqlrc`.
-
-## 2025.07.24
-
-- [14](https://github.com/Shopify/shopify-app-template-react-router/pull/14/files) Add [App Bridge web components](https://shopify.dev/docs/api/app-home/app-bridge-web-components) to the template.
-
-## July 2025
-
-Forked the [shopify-app-template repo](https://github.com/Shopify/shopify-app-template-remix)
-
-# @shopify/shopify-app-template-remix
-
-## 2025.03.18
-
--[#998](https://github.com/Shopify/shopify-app-template-remix/pull/998) Update to Vite 6
-
-## 2025.03.01
-
-- [#982](https://github.com/Shopify/shopify-app-template-remix/pull/982) Add Shopify Dev Assistant extension to the VSCode extension recommendations
-
-## 2025.01.31
-
-- [#952](https://github.com/Shopify/shopify-app-template-remix/pull/952) Update to Shopify App API v2025-01
-
-## 2025.01.23
-
-- [#923](https://github.com/Shopify/shopify-app-template-remix/pull/923) Update `@shopify/shopify-app-session-storage-prisma` to v6.0.0
-
-## 2025.01.8
-
-- [#923](https://github.com/Shopify/shopify-app-template-remix/pull/923) Enable GraphQL autocomplete for Javascript
-
-## 2024.12.19
-
-- [#904](https://github.com/Shopify/shopify-app-template-remix/pull/904) bump `@shopify/app-bridge-react` to latest
--
-## 2024.12.18
-
-- [875](https://github.com/Shopify/shopify-app-template-remix/pull/875) Add Scopes Update Webhook
-## 2024.12.05
-
-- [#910](https://github.com/Shopify/shopify-app-template-remix/pull/910) Install `openssl` in Docker image to fix Prisma (see [#25817](https://github.com/prisma/prisma/issues/25817#issuecomment-2538544254))
-- [#907](https://github.com/Shopify/shopify-app-template-remix/pull/907) Move `@remix-run/fs-routes` to `dependencies` to fix Docker image build
-- [#899](https://github.com/Shopify/shopify-app-template-remix/pull/899) Disable v3_singleFetch flag
-- [#898](https://github.com/Shopify/shopify-app-template-remix/pull/898) Enable the `removeRest` future flag so new apps aren't tempted to use the REST Admin API.
-
-## 2024.12.04
-
-- [#891](https://github.com/Shopify/shopify-app-template-remix/pull/891) Enable remix future flags.
-
-## 2024.11.26
-
-- [888](https://github.com/Shopify/shopify-app-template-remix/pull/888) Update restResources version to 2024-10
-
-## 2024.11.06
-
-- [881](https://github.com/Shopify/shopify-app-template-remix/pull/881) Update to the productCreate mutation to use the new ProductCreateInput type
-
-## 2024.10.29
-
-- [876](https://github.com/Shopify/shopify-app-template-remix/pull/876) Update shopify-app-remix to v3.4.0 and shopify-app-session-storage-prisma to v5.1.5
-
-## 2024.10.02
-
-- [863](https://github.com/Shopify/shopify-app-template-remix/pull/863) Update to Shopify App API v2024-10 and shopify-app-remix v3.3.2
-
-## 2024.09.18
-
-- [850](https://github.com/Shopify/shopify-app-template-remix/pull/850) Removed "~" import alias
-
-## 2024.09.17
-
-- [842](https://github.com/Shopify/shopify-app-template-remix/pull/842) Move webhook processing to individual routes
-
-## 2024.08.19
-
-Replaced deprecated `productVariantUpdate` with `productVariantsBulkUpdate`
-
-## v2024.08.06
-
-Allow `SHOP_REDACT` webhook to process without admin context
-
-## v2024.07.16
-
-Started tracking changes and releases using calver
-
-Ok!
+### Actions de déploiement
+1. Mettre à jour `SCOPES` sur Vercel (voir `.env.example`) et définir `CRON_SECRET` (et idéalement `TOKEN_SECRET`, `MAIL_FROM`).
+2. `npx shopify app deploy --config shopify.app.returnflow.toml` (scopes, webhooks, App Proxy, extension).
+3. Les marchands acceptent les nouveaux scopes à la prochaine ouverture de l'app.
+4. Demander l'accès aux données client protégées dans le Partner Dashboard.

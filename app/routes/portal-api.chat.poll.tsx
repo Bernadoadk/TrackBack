@@ -1,55 +1,44 @@
+// GET /portal-api/chat/poll?shop=&token=&since= — customer side of the chat.
+// Requires a signed chat token; unverified tokens only see recent messages.
 import type { LoaderFunctionArgs } from "react-router";
 import prisma from "../db.server";
-import { authenticate } from "../shopify.server";
+import { getShopPlan } from "../lib/plan.server";
+import { hasFeature } from "../lib/plans";
+import { sanitizeShop } from "../lib/portal.server";
+import { verifyChatToken } from "../lib/tokens.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
+  const shop = sanitizeShop(url.searchParams.get("shop"));
+  const token = verifyChatToken(url.searchParams.get("token"));
+  if (!shop || !token || token.shop !== shop) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
-  let shop = "";
-  try {
-    const auth = await authenticate.public.appProxy(request);
-    if (auth?.session) shop = auth.session.shop;
-  } catch {
-    // fall through
-  }
-  if (!shop) shop = url.searchParams.get("shop") || "";
-  if (!shop) return Response.json({ error: "Missing shop" }, { status: 400 });
-
-  const email = (url.searchParams.get("email") || "").trim().toLowerCase();
-  const since = url.searchParams.get("since");
-  if (!email) return Response.json({ error: "Missing email" }, { status: 400 });
-
-  const conversation = await prisma.conversation.findUnique({
-    where: {
-      shop_type_customerEmail: { shop, type: "CLIENT", customerEmail: email },
-    },
-  });
-
-  if (!conversation) {
+  const settings = await prisma.shopSettings.findUnique({ where: { shop }, select: { liveChatEnabled: true } });
+  if (!settings?.liveChatEnabled || !hasFeature(await getShopPlan(shop), "liveChat")) {
     return Response.json({ conversationId: null, messages: [] });
   }
 
-  // Mark merchant messages as read by customer
+  const conversation = await prisma.conversation.findUnique({
+    where: { shop_type_customerEmail: { shop, type: "CLIENT", customerEmail: token.email } },
+  });
+  if (!conversation) return Response.json({ conversationId: null, messages: [] });
+
   if (conversation.unreadByCustomer > 0) {
-    await prisma.conversation.update({
-      where: { id: conversation.id },
-      data: { unreadByCustomer: 0 },
-    });
+    await prisma.conversation.update({ where: { id: conversation.id }, data: { unreadByCustomer: 0 } });
     await prisma.chatMessage.updateMany({
-      where: {
-        conversationId: conversation.id,
-        senderType: { in: ["MERCHANT", "SUPPORT"] },
-        readAt: null,
-      },
+      where: { conversationId: conversation.id, senderType: { in: ["MERCHANT", "SUPPORT"] }, readAt: null },
       data: { readAt: new Date() },
     });
   }
 
+  const sinceParam = url.searchParams.get("since");
+  const sinceDates: Date[] = [];
+  if (sinceParam && !Number.isNaN(new Date(sinceParam).getTime())) sinceDates.push(new Date(sinceParam));
+  if (!token.verified) sinceDates.push(new Date(token.since - 1000));
+  const after = sinceDates.length ? new Date(Math.max(...sinceDates.map((d) => d.getTime()))) : null;
+
   const messages = await prisma.chatMessage.findMany({
-    where: {
-      conversationId: conversation.id,
-      ...(since ? { createdAt: { gt: new Date(since) } } : {}),
-    },
+    where: { conversationId: conversation.id, ...(after ? { createdAt: { gt: after } } : {}) },
     orderBy: { createdAt: "asc" },
     take: 200,
   });

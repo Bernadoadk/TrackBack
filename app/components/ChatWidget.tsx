@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "./ui";
+import { hasIcon } from "./icon-registry";
 
 type Msg = {
   id: string;
@@ -10,66 +11,88 @@ type Msg = {
   createdAt: string;
 };
 
+type Texts = {
+  chatTitle: string;
+  chatSubtitle: string;
+  chatIntro: string;
+  chatName: string;
+  chatEmail: string;
+  chatStart: string;
+  chatPlaceholder: string;
+  chatSend: string;
+  chatEmpty: string;
+  chatError: string;
+  errInvalidEmail: string;
+  close: string;
+};
+
 type Props = {
   shop: string;
   brandColor?: string;
   storeName?: string;
-  // Pre-fill identity (when client is in middle of a return)
+  texts: Texts;
+  /** Verified token issued by the order lookup — gives access to the full history. */
+  verifiedToken?: string | null;
   prefillEmail?: string;
   prefillName?: string;
-  // Source endpoint (defaults to portal)
-  sendUrl?: string;
-  pollUrl?: string;
-  // Position
   position?: "bottom-right" | "bottom-left";
-  // Lucide icon name for the floating button (e.g. "MessageCircle", "MessageSquare", "Mail", ...)
   icon?: string;
+  /** Render in the page flow instead of a fixed bubble (portal embedded in a storefront iframe). */
+  inline?: boolean;
 };
 
-const STORAGE_KEY = "rf_chat_identity";
-const POLL_INTERVAL_MS = 4000;
+type Identity = { token: string; email: string; name: string };
 
-function readStoredIdentity() {
+const OPEN_POLL_MS = 5000;
+const IDLE_POLL_MS = 20000;
+
+const storageKey = (shop: string) => `tb_chat_${shop}`;
+
+function readIdentity(shop: string): Identity | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(storageKey(shop));
     if (!raw) return null;
-    return JSON.parse(raw) as { email: string; name: string };
+    const v = JSON.parse(raw);
+    return v?.token && v?.email ? v : null;
   } catch {
     return null;
   }
 }
 
-function storeIdentity(email: string, name: string) {
+function writeIdentity(shop: string, id: Identity) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ email, name }));
-  } catch { /* ignore */ }
+    localStorage.setItem(storageKey(shop), JSON.stringify(id));
+  } catch {
+    /* private mode — identity lives in memory only */
+  }
 }
 
 function formatTime(iso: string) {
-  const d = new Date(iso);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 export default function ChatWidget({
   shop,
   brandColor = "#6C63FF",
   storeName = "Support",
+  texts,
+  verifiedToken,
   prefillEmail,
   prefillName,
-  sendUrl = "/portal-api/chat/send",
-  pollUrl = "/portal-api/chat/poll",
   position = "bottom-right",
   icon = "MessageCircle",
+  inline = false,
 }: Props) {
   const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
+  const [identity, setIdentity] = useState<Identity | null>(null);
   const [email, setEmail] = useState(prefillEmail || "");
   const [name, setName] = useState(prefillName || "");
-  const [identified, setIdentified] = useState(Boolean(prefillEmail));
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [unread, setUnread] = useState(0);
   const lastTsRef = useRef<string | null>(null);
@@ -79,135 +102,140 @@ export default function ChatWidget({
 
   useEffect(() => setMounted(true), []);
 
-  // Restore identity from localStorage on mount
+  // Identity: a verified token from the order lookup wins over a stored one.
   useEffect(() => {
-    if (prefillEmail) {
-      setIdentified(true);
+    if (verifiedToken && prefillEmail) {
+      const id = { token: verifiedToken, email: prefillEmail.toLowerCase(), name: prefillName || "" };
+      setIdentity(id);
+      writeIdentity(shop, id);
       return;
     }
-    const stored = readStoredIdentity();
-    if (stored?.email) {
+    const stored = readIdentity(shop);
+    if (stored) {
+      setIdentity(stored);
       setEmail(stored.email);
-      setName(stored.name || "");
-      setIdentified(true);
+      setName(stored.name);
     }
-  }, [prefillEmail]);
+  }, [shop, verifiedToken, prefillEmail, prefillName]);
 
-  // Polling loop
-  useEffect(() => {
-    if (!identified || !email) return;
-    let cancelled = false;
-
-    const poll = async () => {
-      try {
-        const params = new URLSearchParams({ shop, email });
-        if (lastTsRef.current) params.set("since", lastTsRef.current);
-        const res = await fetch(`${pollUrl}?${params.toString()}`, {
-          headers: { Accept: "application/json" },
-        });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (cancelled) return;
-        if (Array.isArray(data.messages) && data.messages.length > 0) {
-          setMessages((prev) => {
-            const seen = new Set(prev.map((m) => m.id));
-            const fresh = (data.messages as Msg[]).filter((m) => !seen.has(m.id));
-            if (fresh.length === 0) return prev;
-            lastTsRef.current = fresh[fresh.length - 1].createdAt;
-            const merged = [...prev, ...fresh];
-            const merchantNew = fresh.filter(
-              (m) => m.senderType !== "CLIENT",
-            ).length;
-            if (merchantNew > 0 && !openRef.current) {
-              setUnread((u) => u + merchantNew);
-            }
-            return merged;
-          });
-        } else if (lastTsRef.current === null && Array.isArray(data.messages)) {
-          lastTsRef.current = new Date().toISOString();
-        }
-      } catch {
-        /* ignore network errors */
+  const poll = useCallback(async () => {
+    if (!identity) return;
+    try {
+      const params = new URLSearchParams({ shop, token: identity.token });
+      if (lastTsRef.current) params.set("since", lastTsRef.current);
+      const res = await fetch(`/portal-api/chat/poll?${params.toString()}`, { headers: { Accept: "application/json" } });
+      if (res.status === 401) {
+        // Token expired: ask the customer to identify again.
+        setIdentity(null);
+        return;
       }
-    };
+      if (!res.ok) return;
+      const data = await res.json();
+      const incoming: Msg[] = Array.isArray(data.messages) ? data.messages : [];
+      if (incoming.length === 0) {
+        if (lastTsRef.current === null) lastTsRef.current = new Date(0).toISOString();
+        return;
+      }
+      setMessages((prev) => {
+        const seen = new Set(prev.map((m) => m.id));
+        const fresh = incoming.filter((m) => !seen.has(m.id));
+        if (fresh.length === 0) return prev;
+        lastTsRef.current = fresh[fresh.length - 1].createdAt;
+        const fromStore = fresh.filter((m) => m.senderType !== "CLIENT").length;
+        if (fromStore > 0 && !openRef.current) setUnread((u) => u + fromStore);
+        return [...prev, ...fresh];
+      });
+    } catch {
+      /* network blip — next tick retries */
+    }
+  }, [identity, shop]);
 
-    poll();
-    const id = setInterval(poll, POLL_INTERVAL_MS);
+  // Visibility-aware polling: fast while the panel is open, slow otherwise,
+  // paused while the tab is hidden.
+  useEffect(() => {
+    if (!identity) return;
+    let timer: ReturnType<typeof setTimeout>;
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled) return;
+      if (typeof document === "undefined" || document.visibilityState === "visible") await poll();
+      timer = setTimeout(tick, openRef.current ? OPEN_POLL_MS : IDLE_POLL_MS);
+    };
+    tick();
+    const onVisible = () => document.visibilityState === "visible" && poll();
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
-      clearInterval(id);
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [identified, email, shop, pollUrl]);
+  }, [identity, poll]);
 
-  // Auto-scroll to bottom on new messages or open
   useEffect(() => {
     if (!open) return;
+    setUnread(0);
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, open]);
 
-  // Clear unread when opened
-  useEffect(() => {
-    if (open) setUnread(0);
-  }, [open]);
-
-  const submitIdentity = (e: React.FormEvent) => {
+  const startChat = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanEmail = email.trim().toLowerCase();
     const cleanName = name.trim();
-    if (!cleanEmail || !cleanEmail.includes("@")) {
-      setError("Please enter a valid email.");
-      return;
-    }
-    if (!cleanName) {
-      setError("Please enter your name.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail) || !cleanName) {
+      setError(texts.errInvalidEmail);
       return;
     }
     setError(null);
-    setEmail(cleanEmail);
-    setName(cleanName);
-    storeIdentity(cleanEmail, cleanName);
-    setIdentified(true);
+    setStarting(true);
+    try {
+      const res = await fetch("/portal-api/chat/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shop, email: cleanEmail }),
+      });
+      const data = await res.json();
+      if (!data.chatToken) throw new Error();
+      const id = { token: data.chatToken, email: cleanEmail, name: cleanName };
+      writeIdentity(shop, id);
+      setIdentity(id);
+    } catch {
+      setError(texts.chatError);
+    } finally {
+      setStarting(false);
+    }
   };
 
   const sendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault();
     const text = input.trim();
-    if (!text || sending) return;
+    if (!text || sending || !identity) return;
     setSending(true);
     setError(null);
-
     const optimistic: Msg = {
       id: "tmp-" + Date.now(),
       senderType: "CLIENT",
-      senderName: name,
+      senderName: identity.name,
       body: text,
       createdAt: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, optimistic]);
     setInput("");
-
     try {
-      const res = await fetch(sendUrl, {
+      const res = await fetch("/portal-api/chat/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ shop, email, name, body: text }),
+        body: JSON.stringify({ shop, token: identity.token, name: identity.name || undefined, body: text }),
       });
       const data = await res.json();
-      if (!res.ok || data.error) {
-        throw new Error(data.error || "Failed to send");
-      }
+      if (!res.ok || data.error || !data.message) throw new Error();
       setMessages((prev) => {
-        // Replace optimistic with real
         const withoutTmp = prev.filter((m) => m.id !== optimistic.id);
-        const seen = new Set(withoutTmp.map((m) => m.id));
-        if (seen.has(data.message.id)) return withoutTmp;
-        return [...withoutTmp, data.message];
+        return withoutTmp.some((m) => m.id === data.message.id) ? withoutTmp : [...withoutTmp, data.message];
       });
       lastTsRef.current = data.message.createdAt;
-    } catch (err: any) {
-      setError(err?.message || "Failed to send. Please try again.");
-      // Remove optimistic on failure
+    } catch {
+      setError(texts.chatError);
       setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
       setInput(text);
     } finally {
@@ -217,47 +245,35 @@ export default function ChatWidget({
 
   if (!mounted) return null;
 
-  const containerStyle: React.CSSProperties = {
-    position: "fixed",
-    bottom: 20,
-    zIndex: 2147483600, // max safe
-    fontFamily: "inherit",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: position === "bottom-right" ? "flex-end" : "flex-start",
-    ...(position === "bottom-right" ? { right: 20 } : { left: 20 }),
-  };
+  const containerStyle: React.CSSProperties = inline
+    ? { position: "relative", display: "flex", flexDirection: "column", alignItems: "flex-end", margin: "8px auto 24px", maxWidth: 768, padding: "0 12px" }
+    : {
+        position: "fixed",
+        bottom: 20,
+        zIndex: 2147483600,
+        fontFamily: "inherit",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: position === "bottom-right" ? "flex-end" : "flex-start",
+        ...(position === "bottom-right" ? { right: 20 } : { left: 20 }),
+      };
 
   const widget = (
     <div style={containerStyle}>
-      {/* Panel */}
       <div
         className={`mb-3 origin-bottom-right transition-all duration-300 ease-out ${
-          open
-            ? "opacity-100 scale-100 translate-y-0 pointer-events-auto"
-            : "opacity-0 scale-95 translate-y-2 pointer-events-none"
-        }`}
-        style={{
-          width: "min(380px, calc(100vw - 32px))",
-          height: "min(560px, calc(100vh - 120px))",
-        }}
+          open ? "opacity-100 scale-100 translate-y-0 pointer-events-auto" : "opacity-0 scale-95 translate-y-2 pointer-events-none"
+        } ${inline && !open ? "hidden" : ""}`}
+        style={{ width: "min(380px, calc(100vw - 32px))", height: "min(560px, calc(100vh - 120px))" }}
+        aria-hidden={!open}
       >
         <div
           className="flex flex-col h-full rounded-2xl overflow-hidden bg-white shadow-2xl"
-          style={{
-            boxShadow:
-              "0 24px 60px -12px rgba(0,0,0,0.25), 0 8px 24px -8px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.04)",
-          }}
+          style={{ boxShadow: "0 24px 60px -12px rgba(0,0,0,0.25), 0 8px 24px -8px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.04)" }}
         >
-          {/* Header */}
           <div
             className="px-4 py-3.5 text-white flex items-center justify-between"
-            style={{
-              background: `linear-gradient(135deg, ${brandColor} 0%, ${shadeColor(
-                brandColor,
-                -20,
-              )} 100%)`,
-            }}
+            style={{ background: `linear-gradient(135deg, ${brandColor} 0%, ${shadeColor(brandColor, -20)} 100%)` }}
           >
             <div className="flex items-center gap-2.5 min-w-0">
               <div className="w-9 h-9 rounded-full bg-white/20 grid place-content-center backdrop-blur-sm shrink-0">
@@ -265,126 +281,82 @@ export default function ChatWidget({
               </div>
               <div className="min-w-0">
                 <div className="text-[14px] font-semibold leading-tight truncate">
-                  {storeName}
+                  {texts.chatTitle.replace("{store}", storeName)}
                 </div>
                 <div className="text-[11px] opacity-80 flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-green-300 inline-block animate-pulse" />
-                  We typically reply within an hour
+                  {texts.chatSubtitle}
                 </div>
               </div>
             </div>
             <button
               onClick={() => setOpen(false)}
               className="w-8 h-8 grid place-content-center rounded-full hover:bg-white/15 transition-colors"
-              aria-label="Close chat"
+              aria-label={texts.close}
             >
               <Icon name="X" size={18} />
             </button>
           </div>
 
-          {/* Body */}
-          {!identified ? (
-            <form
-              onSubmit={submitIdentity}
-              className="flex-1 flex flex-col p-5 gap-3 bg-gray-50"
-            >
-              <div className="text-[14px] font-semibold text-gray-800">
-                👋 Hi there!
-              </div>
-              <div className="text-[13px] text-gray-600 leading-relaxed">
-                Leave your email and name so we can reply even if you close this
-                window.
-              </div>
+          {!identity ? (
+            <form onSubmit={startChat} className="flex-1 flex flex-col p-5 gap-3 bg-gray-50">
+              <div className="text-[14px] font-semibold text-gray-800">👋</div>
+              <div className="text-[13px] text-gray-600 leading-relaxed">{texts.chatIntro}</div>
               <input
                 type="text"
-                placeholder="Your name"
+                placeholder={texts.chatName}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="px-3 py-2.5 rounded-lg border border-gray-200 text-[13.5px] focus:outline-none focus:ring-2 bg-white"
-                style={{ borderColor: "#E5E7EB" }}
-                onFocus={(e) => (e.currentTarget.style.borderColor = brandColor)}
-                onBlur={(e) => (e.currentTarget.style.borderColor = "#E5E7EB")}
-                autoFocus
+                className="px-3 py-2.5 rounded-lg border border-gray-200 text-[13.5px] focus:outline-none bg-white"
+                maxLength={80}
               />
               <input
                 type="email"
-                placeholder="Email address"
+                placeholder={texts.chatEmail}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="px-3 py-2.5 rounded-lg border border-gray-200 text-[13.5px] focus:outline-none bg-white"
-                onFocus={(e) => (e.currentTarget.style.borderColor = brandColor)}
-                onBlur={(e) => (e.currentTarget.style.borderColor = "#E5E7EB")}
+                maxLength={254}
               />
-              {error && (
-                <div className="text-[12px] text-red-600">{error}</div>
-              )}
+              {error && <div className="text-[12px] text-red-600">{error}</div>}
               <button
                 type="submit"
-                className="mt-1 px-4 py-2.5 rounded-lg text-white text-[13.5px] font-semibold transition-transform hover:scale-[1.01] active:scale-[0.99]"
+                disabled={starting}
+                className="mt-1 px-4 py-2.5 rounded-lg text-white text-[13.5px] font-semibold transition-transform hover:scale-[1.01] active:scale-[0.99] disabled:opacity-60"
                 style={{ background: brandColor }}
               >
-                Start chatting
+                {starting ? <Icon name="LoaderCircle" size={16} className="animate-spin mx-auto" /> : texts.chatStart}
               </button>
             </form>
           ) : (
             <>
-              {/* Messages */}
-              <div
-                ref={scrollRef}
-                className="flex-1 overflow-y-auto px-4 py-4 bg-gray-50 space-y-2.5"
-              >
+              <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 bg-gray-50 space-y-2.5">
                 {messages.length === 0 && (
                   <div className="text-center py-8 text-gray-400 text-[13px]">
-                    <div
-                      className="w-12 h-12 mx-auto mb-2 rounded-full grid place-content-center"
-                      style={{ background: shadeColor(brandColor, 80) }}
-                    >
-                      <Icon
-                        name="MessageCircle"
-                        size={20}
-                        className="opacity-80"
-                        style={{ color: brandColor }}
-                      />
+                    <div className="w-12 h-12 mx-auto mb-2 rounded-full grid place-content-center" style={{ background: shadeColor(brandColor, 80) }}>
+                      <Icon name="MessageCircle" size={20} className="opacity-80" style={{ color: brandColor }} />
                     </div>
-                    Send your first message — we'll get back to you ASAP.
+                    {texts.chatEmpty}
                   </div>
                 )}
                 {messages.map((m) => {
                   const fromMe = m.senderType === "CLIENT";
                   return (
-                    <div
-                      key={m.id}
-                      className={`flex ${fromMe ? "justify-end" : "justify-start"} animate-fadeIn`}
-                    >
+                    <div key={m.id} className={`flex ${fromMe ? "justify-end" : "justify-start"} animate-fadeIn`}>
                       <div
                         className={`max-w-[78%] rounded-2xl px-3.5 py-2 text-[13.5px] leading-relaxed shadow-sm ${
                           fromMe ? "text-white rounded-br-md" : "bg-white text-gray-800 rounded-bl-md border border-gray-100"
                         }`}
-                        style={
-                          fromMe
-                            ? { background: brandColor }
-                            : undefined
-                        }
+                        style={fromMe ? { background: brandColor } : undefined}
                       >
-                        <div className="whitespace-pre-wrap break-words">
-                          {m.body}
-                        </div>
-                        <div
-                          className={`mt-1 text-[10px] ${fromMe ? "text-white/70" : "text-gray-400"}`}
-                        >
-                          {formatTime(m.createdAt)}
-                        </div>
+                        <div className="whitespace-pre-wrap break-words">{m.body}</div>
+                        <div className={`mt-1 text-[10px] ${fromMe ? "text-white/70" : "text-gray-400"}`}>{formatTime(m.createdAt)}</div>
                       </div>
                     </div>
                   );
                 })}
               </div>
-
-              {/* Input */}
-              <form
-                onSubmit={sendMessage}
-                className="border-t border-gray-100 p-3 bg-white flex items-end gap-2"
-              >
+              <form onSubmit={sendMessage} className="border-t border-gray-100 p-3 bg-white flex items-end gap-2">
                 <textarea
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
@@ -395,37 +367,26 @@ export default function ChatWidget({
                     }
                   }}
                   rows={1}
-                  placeholder="Type a message…"
+                  maxLength={4000}
+                  placeholder={texts.chatPlaceholder}
                   className="flex-1 resize-none px-3 py-2 rounded-lg border border-gray-200 text-[13.5px] focus:outline-none bg-gray-50 max-h-32"
-                  style={{ borderColor: "#E5E7EB" }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = brandColor)}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = "#E5E7EB")}
                 />
                 <button
                   type="submit"
                   disabled={sending || !input.trim()}
                   className="w-9 h-9 shrink-0 grid place-content-center rounded-full text-white disabled:opacity-40 transition-transform hover:scale-105 active:scale-95"
                   style={{ background: brandColor }}
-                  aria-label="Send"
+                  aria-label={texts.chatSend}
                 >
-                  {sending ? (
-                    <Icon name="Loader2" size={16} className="animate-spin" />
-                  ) : (
-                    <Icon name="Send" size={15} strokeWidth={2.25} />
-                  )}
+                  {sending ? <Icon name="LoaderCircle" size={16} className="animate-spin" /> : <Icon name="Send" size={15} strokeWidth={2.25} />}
                 </button>
               </form>
-              {error && (
-                <div className="px-4 pb-2 text-[12px] text-red-600 bg-white">
-                  {error}
-                </div>
-              )}
+              {error && <div className="px-4 pb-2 text-[12px] text-red-600 bg-white">{error}</div>}
             </>
           )}
         </div>
       </div>
 
-      {/* Floating button */}
       <button
         onClick={() => setOpen((v) => !v)}
         className="relative w-14 h-14 rounded-full grid place-content-center text-white shadow-xl transition-transform hover:scale-105 active:scale-95"
@@ -433,57 +394,36 @@ export default function ChatWidget({
           background: `linear-gradient(135deg, ${brandColor} 0%, ${shadeColor(brandColor, -20)} 100%)`,
           boxShadow: `0 12px 28px -8px ${hexAlpha(brandColor, 0.55)}, 0 0 0 1px rgba(255,255,255,0.06) inset`,
         }}
-        aria-label={open ? "Close chat" : "Open chat"}
+        aria-label={texts.chatTitle.replace("{store}", storeName)}
       >
         <div className="transition-transform duration-300" style={{ transform: open ? "rotate(90deg)" : "rotate(0deg)" }}>
-          {open ? <Icon name="X" size={22} /> : <Icon name={icon} size={22} strokeWidth={2.25} />}
+          {open ? <Icon name="X" size={22} /> : <Icon name={hasIcon(icon) ? icon : "MessageCircle"} size={22} strokeWidth={2.25} />}
         </div>
         {!open && unread > 0 && (
           <span className="absolute -top-1 -right-1 min-w-[22px] h-[22px] px-1.5 rounded-full bg-red-500 text-white text-[11px] font-bold grid place-content-center ring-2 ring-white animate-pulse">
             {unread > 9 ? "9+" : unread}
           </span>
         )}
-        {!open && (
-          <span
-            className="absolute inset-0 rounded-full animate-ping"
-            style={{ background: brandColor, opacity: 0.2 }}
-          />
-        )}
       </button>
     </div>
   );
 
-  return createPortal(widget, document.body);
+  return inline ? widget : createPortal(widget, document.body);
 }
 
-// ---------- helpers ----------
 function shadeColor(hex: string, percent: number): string {
   const clean = hex.replace("#", "");
-  const num = parseInt(
-    clean.length === 3
-      ? clean.split("").map((c) => c + c).join("")
-      : clean,
-    16,
-  );
-  let r = (num >> 16) + Math.round((255 * percent) / 100);
-  let g = ((num >> 8) & 0xff) + Math.round((255 * percent) / 100);
-  let b = (num & 0xff) + Math.round((255 * percent) / 100);
-  r = Math.max(0, Math.min(255, r));
-  g = Math.max(0, Math.min(255, g));
-  b = Math.max(0, Math.min(255, b));
+  const num = parseInt(clean.length === 3 ? clean.split("").map((c) => c + c).join("") : clean, 16);
+  const clamp = (v: number) => Math.max(0, Math.min(255, v));
+  const d = Math.round((255 * percent) / 100);
+  const r = clamp((num >> 16) + d);
+  const g = clamp(((num >> 8) & 0xff) + d);
+  const b = clamp((num & 0xff) + d);
   return "#" + ((r << 16) | (g << 8) | b).toString(16).padStart(6, "0");
 }
 
 function hexAlpha(hex: string, alpha: number): string {
   const clean = hex.replace("#", "");
-  const num = parseInt(
-    clean.length === 3
-      ? clean.split("").map((c) => c + c).join("")
-      : clean,
-    16,
-  );
-  const r = num >> 16;
-  const g = (num >> 8) & 0xff;
-  const b = num & 0xff;
-  return `rgba(${r},${g},${b},${alpha})`;
+  const num = parseInt(clean.length === 3 ? clean.split("").map((c) => c + c).join("") : clean, 16);
+  return `rgba(${num >> 16},${(num >> 8) & 0xff},${num & 0xff},${alpha})`;
 }

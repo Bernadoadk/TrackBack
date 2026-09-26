@@ -6,7 +6,7 @@ import { markMerchantActive } from "../lib/chat.server";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
-  markMerchantActive(shop);
+  await markMerchantActive(shop);
 
   const conversations = await prisma.conversation.findMany({
     where: { shop },

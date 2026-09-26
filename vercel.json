@@ -1,6 +1,9 @@
 {
-  "buildCommand": "npx prisma generate && npx prisma db push --accept-data-loss && npx react-router build",
+  "buildCommand": "npx prisma generate && npx prisma db push && npx react-router build",
   "installCommand": "npm install",
   "framework": "react-router",
-  "outputDirectory": "build"
+  "outputDirectory": "build",
+  "crons": [
+    { "path": "/api/cron/daily", "schedule": "0 6 * * *" }
+  ]
 }

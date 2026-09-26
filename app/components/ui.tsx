@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react';
-import { icons } from 'lucide-react';
 import { Link, useLocation, useFetcher } from 'react-router';
+import { planAtLeast, planTier, isAnnualPlan, TIER_LABEL, type PlanTier } from '../lib/plans';
+import { ICONS, hasIcon } from './icon-registry';
 
-// ---- Icon wrapper around lucide-react ----
+// ---- Icon wrapper around lucide-react (names must be in icon-registry.ts) ----
 export function Icon({ name, size = 16, className = '', strokeWidth = 2, style }: any) {
-  const LucideIcon = (icons as any)[name];
-  if (!LucideIcon) return null;
+  if (!hasIcon(name)) return null;
+  const LucideIcon = ICONS[name];
   return <LucideIcon size={size} className={className} strokeWidth={strokeWidth} style={style} />;
 }
 
@@ -134,7 +135,7 @@ export function Btn({ variant = 'primary', size = 'md', children, className = ''
   return (
     <button className={`${base} ${transition} ${sizes[size]} ${variants[variant]} ${className}`} disabled={loading || rest.disabled} {...rest}>
       {loading ? (
-        <Icon name="Loader2" size={iconSize} className="animate-spin" />
+        <Icon name="LoaderCircle" size={iconSize} className="animate-spin" />
       ) : icon ? (
         <Icon name={icon} size={iconSize} className="transition-transform group-hover:-translate-x-[1px]" />
       ) : null}
@@ -226,9 +227,7 @@ export function Card({ title, subtitle, action, children, className = '', paddin
 }
 
 // ---- Sidebar ----
-const PLAN_LEVEL: Record<string, number> = { free: 0, starter: 1, pro: 2 };
-
-export const NAV = [
+export const NAV: { key: string; path: string; label: string; icon: string; badge?: string; requiredPlan?: PlanTier }[] = [
   { key: 'dashboard', path: '/app', label: 'Dashboard', icon: 'LayoutDashboard' },
   { key: 'returns', path: '/app/returns', label: 'Returns', icon: 'Package', badge: 'pending' },
   { key: 'messages', path: '/app/messages', label: 'Messages', icon: 'MessageCircle', badge: 'unread' },
@@ -280,7 +279,7 @@ export function Sidebar({ pendingCount, unreadCount = 0, shop, shopName, planNam
         <div className="px-2 mb-1.5 text-[10px] uppercase tracking-[0.1em] text-faint font-semibold">Workspace</div>
         {NAV.map(item => {
           const isActive = item.path === '/app' ? currentPath === '/app' : currentPath.startsWith(item.path);
-          const isLocked = !!(item.requiredPlan && (PLAN_LEVEL[planName] ?? 0) < (PLAN_LEVEL[item.requiredPlan] ?? 0));
+          const isLocked = !!(item.requiredPlan && !planAtLeast(planName, item.requiredPlan));
           return (
             <Link key={item.key} to={`${item.path}${location.search}`}
               className={`w-full group flex items-center gap-2.5 px-2.5 py-2 rounded-md text-[13px] relative
@@ -346,8 +345,8 @@ export function Sidebar({ pendingCount, unreadCount = 0, shop, shopName, planNam
           </div>
           <div className="flex-1 min-w-0">
             <div className="text-[13px] font-semibold text-ink truncate leading-tight">{shopName}</div>
-            <div className="text-[11px] text-muted truncate capitalize">
-              {planName} plan · {planLimit >= 999999 ? `${usedThisMonth} used` : `${usedThisMonth}/${planLimit} used`}
+            <div className="text-[11px] text-muted truncate">
+              {TIER_LABEL[planTier(planName)]}{isAnnualPlan(planName) ? ' · annual' : ''} · {planLimit >= 999999 ? `${usedThisMonth} returns` : `${usedThisMonth}/${planLimit} returns`}
             </div>
           </div>
           <Icon name="Settings" size={14} className="text-muted group-hover:text-ink group-hover:rotate-45 transition-all duration-300 ease-smooth" />
@@ -551,14 +550,14 @@ export function CloudinaryLogoUploader({ value, onUpload, onRemove }: {
         >
           {isUploading ? (
             <>
-              <Icon name="Loader2" size={20} className="text-accent animate-spin" />
+              <Icon name="LoaderCircle" size={20} className="text-accent animate-spin" />
               <span className="text-[12px] text-muted">Uploading to Cloudinary…</span>
             </>
           ) : (
             <>
               <div className={`w-8 h-8 rounded-lg grid place-content-center transition ${isDragging ? 'text-accent' : 'text-muted'}`}
                 style={isDragging ? { background: 'rgba(108,99,255,0.12)' } : { background: 'rgba(0,0,0,0.04)' }}>
-                <Icon name={isDragging ? 'DownloadCloud' : 'Upload'} size={16} />
+                <Icon name={isDragging ? 'CloudDownload' : 'Upload'} size={16} />
               </div>
               <div className="text-center">
                 <p className="text-[12px] font-medium text-ink">{isDragging ? 'Drop here' : 'Drag logo here'}</p>
@@ -572,7 +571,7 @@ export function CloudinaryLogoUploader({ value, onUpload, onRemove }: {
       {/* Upload loading overlay when logo exists */}
       {value && isUploading && (
         <div className="mt-2 flex items-center gap-2 text-[11.5px] text-muted">
-          <Icon name="Loader2" size={12} className="animate-spin text-accent" />
+          <Icon name="LoaderCircle" size={12} className="animate-spin text-accent" />
           Uploading to Cloudinary…
         </div>
       )}
@@ -586,5 +585,49 @@ export function CloudinaryLogoUploader({ value, onUpload, onRemove }: {
         </p>
       )}
     </div>
+  );
+}
+
+// ---- Plan gating helpers ----
+export function TierBadge({ tier }: { tier: PlanTier }) {
+  if (tier === 'free') return null;
+  return (
+    <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ring-1 ring-inset"
+      style={{ background: 'rgba(108,99,255,0.14)', color: '#8B85FF', borderColor: 'rgba(108,99,255,0.25)' }}>
+      {TIER_LABEL[tier]}
+    </span>
+  );
+}
+
+/** Inline "requires plan X" notice with an upgrade link (keeps billing params). */
+export function UpgradeNotice({ tier, children }: { tier: PlanTier; children?: React.ReactNode }) {
+  const location = useLocation();
+  return (
+    <div className="flex items-center justify-between gap-3 p-3 rounded-md border border-divider bg-bg/40">
+      <div className="flex items-center gap-2 text-[12.5px] text-muted">
+        <Icon name="Lock" size={13} className="text-faint shrink-0" />
+        <span>{children ?? `Available on the ${TIER_LABEL[tier]} plan.`}</span>
+      </div>
+      <Link to={`/app/billing${location.search}`}
+        className="shrink-0 inline-flex items-center gap-1 px-2.5 h-7 rounded-md text-[12px] font-semibold text-white"
+        style={{ background: 'linear-gradient(90deg,#6C63FF,#8B5CF6)' }}>
+        Upgrade <Icon name="ArrowRight" size={12} />
+      </Link>
+    </div>
+  );
+}
+
+// ---- Risk badge (fraud signals, Pro) ----
+export function RiskBadge({ level, compact = false }: { level?: string | null; compact?: boolean }) {
+  if (level !== 'high' && level !== 'medium') return null;
+  const high = level === 'high';
+  const color = high ? '#EF4444' : '#F59E0B';
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full font-semibold text-[10.5px] px-2 py-0.5"
+      title={high ? 'High risk: frequent returner' : 'Medium risk: returns often'}
+      style={{ background: `${color}1F`, color, boxShadow: `inset 0 0 0 1px ${color}33` }}>
+      <Icon name="ShieldAlert" size={11} />
+      {!compact && (high ? 'High risk' : 'Watch')}
+    </span>
   );
 }

@@ -6,7 +6,7 @@ import { markMerchantActive } from "../lib/chat.server";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
-  markMerchantActive(shop);
+  await markMerchantActive(shop);
 
   const url = new URL(request.url);
   const conversationId = url.searchParams.get("conversationId");

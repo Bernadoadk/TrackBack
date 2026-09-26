@@ -3,9 +3,14 @@ import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import { useLoaderData, useSubmit, useNavigation, useActionData, Link, useLocation } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { uploadToCloudinary, deleteFromCloudinary, isCloudinaryUrl } from "../lib/cloudinary.server";
-import { getShopPlan, planAtLeast, syncBillingFromShopify } from "../lib/plan.server";
+import { uploadToCloudinary, deleteShopAsset, isAcceptableImageDataUrl, shopFolder } from "../lib/cloudinary.server";
+import { ensureBillingSynced, getShopPlan } from "../lib/plan.server";
+import { hasFeature } from "../lib/plans";
 import { Icon, useToast, ColorPicker, CloudinaryLogoUploader, Toggle } from "../components/ui";
+import {
+  CUSTOMIZABLE_KEYS, LOCALE_LABELS, PORTAL_STRINGS, normalizeLocale, parseLocales, parsePortalTexts, resolvePortalTexts,
+  type CustomizableKey, type Locale, type PortalDictionary,
+} from "../lib/i18n";
 import { requestShopifyReviewAfterSuccessfulWorkflow } from "../lib/reviews.client";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -49,6 +54,7 @@ type EditorSettings = {
   labelTrackingToggle: string;
   liveChatEnabled: boolean;
   liveChatIcon: string;
+  _strings?: PortalDictionary;
 };
 
 // ─── Loader ──────────────────────────────────────────────────────────────────
@@ -57,16 +63,33 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
   const shop = session.shop;
 
-  // Sync directly here (instead of just reading via getShopPlan) so we don't
-  // race with the parent app.tsx loader on direct/refresh loads of this page.
   const [s, plan] = await Promise.all([
     prisma.shopSettings.findUnique({ where: { shop } }).then(r => r ?? prisma.shopSettings.create({ data: { shop } })),
-    syncBillingFromShopify(admin, shop),
+    ensureBillingSynced(admin, shop),
   ]);
+
+  const locales = parseLocales(s.portalLocales);
+  const defaultLocale = (normalizeLocale(s.defaultLocale) ?? "en") as Locale;
+  const whiteLabel = hasFeature(plan, "whiteLabel");
+  const overrides = parsePortalTexts(s.portalTexts);
+  // Effective texts per language (defaults ← legacy columns ← overrides).
+  const texts = Object.fromEntries(locales.map((locale) => {
+    const dict = resolvePortalTexts({
+      locale, defaultLocale, overrides, whiteLabel,
+      legacy: Object.fromEntries(CUSTOMIZABLE_KEYS.map((k) => [k, (s as any)[k]])) as any,
+    });
+    return [locale, Object.fromEntries(CUSTOMIZABLE_KEYS.map((k) => [k, dict[k]]))];
+  })) as Record<Locale, Record<CustomizableKey, string>>;
 
   return {
     shop,
     plan,
+    canEdit: hasFeature(plan, "portalEditor"),
+    canChat: hasFeature(plan, "liveChat"),
+    whiteLabel,
+    locales,
+    defaultLocale,
+    texts,
     initial: {
       portalLayout: s.portalLayout,
       brandColor: s.brandColor,
@@ -91,8 +114,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       labelStartAnother: s.labelStartAnother,
       labelPoweredBy: s.labelPoweredBy,
       labelTrackingToggle: s.labelTrackingToggle,
-      liveChatEnabled: (s as any).liveChatEnabled ?? true,
-      liveChatIcon: (s as any).liveChatIcon ?? "MessageCircle",
+      liveChatEnabled: s.liveChatEnabled ?? true,
+      liveChatIcon: s.liveChatIcon ?? "MessageCircle",
     } satisfies EditorSettings,
   };
 };
@@ -103,61 +126,64 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
   const plan = await getShopPlan(shop);
-  if (!planAtLeast(plan, 'starter')) {
+  if (!hasFeature(plan, "portalEditor")) {
     return { error: 'upgrade_required' };
   }
   const fd = await request.formData();
   const intent = fd.get("intent") as string | null;
 
   if (intent === "upload_logo") {
-    const base64 = fd.get("base64") as string;
-    const previousUrl = fd.get("previousUrl") as string;
-    if (previousUrl && isCloudinaryUrl(previousUrl)) {
-      await deleteFromCloudinary(previousUrl).catch(() => { });
-    }
-    const { url } = await uploadToCloudinary(base64);
+    const base64 = String(fd.get("base64") ?? "");
+    if (!isAcceptableImageDataUrl(base64)) return { error: "Unsupported image" };
+    const current = await prisma.shopSettings.findUnique({ where: { shop }, select: { logoUrl: true } });
+    const { url } = await uploadToCloudinary(base64, shopFolder(shop, "logos"));
     await prisma.shopSettings.update({ where: { shop }, data: { logoUrl: url } });
+    await deleteShopAsset(shop, current?.logoUrl);
     return { logoUrl: url };
   }
 
   if (intent === "remove_logo") {
-    const logoUrl = fd.get("logoUrl") as string;
-    if (isCloudinaryUrl(logoUrl)) {
-      await deleteFromCloudinary(logoUrl).catch(() => { });
-    }
+    const current = await prisma.shopSettings.findUnique({ where: { shop }, select: { logoUrl: true } });
     await prisma.shopSettings.update({ where: { shop }, data: { logoUrl: null } });
+    await deleteShopAsset(shop, current?.logoUrl);
     return { removed: true };
   }
 
+  // Per-language texts: only keep values that differ from the built-in defaults.
+  const whiteLabel = hasFeature(plan, "whiteLabel");
+  let incoming: Record<string, Record<string, string>> = {};
+  try { incoming = JSON.parse(String(fd.get("texts") ?? "{}")); } catch { incoming = {}; }
+  const portalTexts: Record<string, Record<string, string>> = {};
+  for (const [loc, values] of Object.entries(incoming)) {
+    const locale = normalizeLocale(loc);
+    if (!locale || !values || typeof values !== "object") continue;
+    const clean: Record<string, string> = {};
+    for (const k of CUSTOMIZABLE_KEYS) {
+      const v = typeof values[k] === "string" ? values[k].slice(0, 300) : undefined;
+      if (v === undefined) continue;
+      if (k === "labelPoweredBy") {
+        if (whiteLabel && v !== PORTAL_STRINGS[locale][k]) clean[k] = v; // "" hides it
+        continue;
+      }
+      if (v.trim() && v !== PORTAL_STRINGS[locale][k]) clean[k] = v;
+    }
+    portalTexts[locale] = clean;
+  }
+
+  const color = (v: FormDataEntryValue | null, fallback: string) => (/^#[0-9a-fA-F]{6}$/.test(String(v ?? "")) ? String(v) : fallback);
+  const layout = String(fd.get("portalLayout") ?? "classic");
   await prisma.shopSettings.update({
     where: { shop },
     data: {
-      portalLayout: fd.get("portalLayout") as string,
-      brandColor: fd.get("brandColor") as string,
-      bannerColor: fd.get("bannerColor") as string,
-      logoUrl: (fd.get("logoUrl") as string) || null,
-      portalStoreName: fd.get("portalStoreName") as string,
-      footerContact: fd.get("footerContact") as string,
-      labelFindOrder: fd.get("labelFindOrder") as string,
-      labelSelectItems: fd.get("labelSelectItems") as string,
-      labelReasons: fd.get("labelReasons") as string,
-      labelRefundType: fd.get("labelRefundType") as string,
-      labelConfirm: fd.get("labelConfirm") as string,
-      labelCta: fd.get("labelCta") as string,
-      labelSubmit: fd.get("labelSubmit") as string,
-      descFindOrder: fd.get("descFindOrder") as string,
-      descSelectItems: fd.get("descSelectItems") as string,
-      descReasons: fd.get("descReasons") as string,
-      descRefundType: fd.get("descRefundType") as string,
-      descConfirm: fd.get("descConfirm") as string,
-      labelBackToStore: fd.get("labelBackToStore") as string,
-      labelCantFind: fd.get("labelCantFind") as string,
-      labelStartAnother: fd.get("labelStartAnother") as string,
-      labelPoweredBy: fd.get("labelPoweredBy") as string,
-      labelTrackingToggle: fd.get("labelTrackingToggle") as string,
-      liveChatEnabled: fd.get("liveChatEnabled") === "true",
-      liveChatIcon: (fd.get("liveChatIcon") as string) || "MessageCircle",
-    } as any,
+      portalLayout: ["classic", "minimal", "bold", "sidebar", "compact"].includes(layout) ? layout : "classic",
+      brandColor: color(fd.get("brandColor"), "#6C63FF"),
+      bannerColor: color(fd.get("bannerColor"), "#ffffff"),
+      portalStoreName: String(fd.get("portalStoreName") ?? "").slice(0, 80),
+      footerContact: String(fd.get("footerContact") ?? "").slice(0, 254),
+      portalTexts,
+      liveChatEnabled: hasFeature(plan, "liveChat") && fd.get("liveChatEnabled") === "true",
+      liveChatIcon: (CHAT_ICON_CHOICES as readonly string[]).includes(String(fd.get("liveChatIcon"))) ? String(fd.get("liveChatIcon")) : "MessageCircle",
+    },
   });
 
   return { success: true };
@@ -166,9 +192,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function PortalEditorPage() {
-  const { initial, shop, plan } = useLoaderData<typeof loader>();
-  const isStarter = plan === 'starter' || plan === 'pro';
-  const isPro = plan === 'pro';
+  const { initial, shop, canEdit, canChat, whiteLabel, locales, defaultLocale, texts: initialTexts } = useLoaderData<typeof loader>();
+  const isStarter = canEdit;
+  const isPro = canChat;
   const submit = useSubmit();
   const navigation = useNavigation();
   const actionData = useActionData<typeof action>();
@@ -177,13 +203,15 @@ export default function PortalEditorPage() {
   const billingHref = `/app/billing${location.search}`;
 
   const [s, setS] = useState<EditorSettings>(initial);
+  const [texts, setTexts] = useState<Record<string, Record<CustomizableKey, string>>>(initialTexts);
+  const [textLocale, setTextLocale] = useState<Locale>(defaultLocale);
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [previewStep, setPreviewStep] = useState(1);
   const [openSection, setOpenSection] = useState("layout");
   const [pendingOpen, setPendingOpen] = useState(false);
 
   const isSaving = navigation.state === "submitting";
-  const isDirty = JSON.stringify(s) !== JSON.stringify(initial);
+  const isDirty = JSON.stringify(s) !== JSON.stringify(initial) || JSON.stringify(texts) !== JSON.stringify(initialTexts);
 
   const wasSaving = useRef(false);
   useEffect(() => {
@@ -212,7 +240,8 @@ export default function PortalEditorPage() {
 
   const doSave = () => {
     const fd = new FormData();
-    (Object.entries(s) as [string, string][]).forEach(([k, v]) => fd.append(k, v));
+    (Object.entries(s) as [string, string][]).forEach(([k, v]) => fd.append(k, String(v)));
+    fd.append("texts", JSON.stringify(texts));
     submit(fd, { method: "POST" });
   };
 
@@ -240,7 +269,7 @@ export default function PortalEditorPage() {
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-md grid place-content-center shrink-0"
             style={{ background: "rgba(108,99,255,0.15)", color: "#8B85FF" }}>
-            <Icon name="Paintbrush2" size={15} />
+            <Icon name="PaintbrushVertical" size={15} />
           </div>
           <div>
             <div className="text-[14px] font-semibold text-ink leading-tight">Portal Editor</div>
@@ -253,7 +282,7 @@ export default function PortalEditorPage() {
             <span className="text-[11.5px] text-muted hidden sm:block">Unsaved changes</span>
           )}
           <button
-            onClick={() => setS(initial)}
+            onClick={() => { setS(initial); setTexts(initialTexts); }}
             disabled={!isDirty || isSaving || !isStarter}
             className="h-8 px-3 rounded-md text-[12.5px] font-medium border border-border bg-surface hover:bg-bg transition disabled:opacity-40"
           >
@@ -266,7 +295,7 @@ export default function PortalEditorPage() {
             style={{ background: "#6C63FF" }}
           >
             {isSaving
-              ? <><Icon name="Loader2" size={13} className="animate-spin" /> Saving…</>
+              ? <><Icon name="LoaderCircle" size={13} className="animate-spin" /> Saving…</>
               : <><Icon name="Check" size={13} /> Save & Publish</>}
           </button>
         </div>
@@ -340,7 +369,7 @@ export default function PortalEditorPage() {
           </AccordionSection>
 
           {/* Footer */}
-          <AccordionSection title="Footer" icon="AlignBottom" open={openSection === "footer"} onToggle={() => toggle("footer")}>
+          <AccordionSection title="Footer" icon="PanelBottom" open={openSection === "footer"} onToggle={() => toggle("footer")}>
             <LabelField
               label="Contact email"
               hint='Shown in the "Need help?" footer link'
@@ -416,7 +445,28 @@ export default function PortalEditorPage() {
 
           {/* Texts */}
           <AccordionSection title="Texts" icon="Type" open={openSection === "texts"} onToggle={() => toggle("texts")}>
-            <TextsSection s={s} set={set} isPro={isPro} />
+            {locales.length > 1 && (
+              <div className="flex gap-0.5 p-0.5 rounded-lg bg-bg border border-border mb-3">
+                {locales.map((l) => (
+                  <button key={l} onClick={() => setTextLocale(l)}
+                    className={`flex-1 h-7 rounded-md text-[12px] font-semibold transition ${textLocale === l ? "bg-surface shadow-sm text-ink" : "text-muted hover:text-ink"}`}>
+                    {LOCALE_LABELS[l]}
+                  </button>
+                ))}
+              </div>
+            )}
+            <TextsSection
+              s={{ ...s, ...(texts[textLocale] ?? {}) } as EditorSettings}
+              set={(k, v) => {
+                if ((CUSTOMIZABLE_KEYS as readonly string[]).includes(k as string)) {
+                  setTexts((prev) => ({ ...prev, [textLocale]: { ...(prev[textLocale] ?? {}), [k]: v } as Record<CustomizableKey, string> }));
+                } else {
+                  set(k, v);
+                }
+              }}
+              isPro={whiteLabel}
+              defaults={PORTAL_STRINGS[textLocale]}
+            />
           </AccordionSection>
 
           <div className="m-4 mt-auto rounded-md border border-divider bg-bg/35 px-3 py-2.5 text-[11.5px] text-muted leading-relaxed flex gap-2">
@@ -471,7 +521,7 @@ export default function PortalEditorPage() {
               title={isDirty ? "Va sauvegarder puis ouvrir le portal" : "Ouvrir le portal live"}
             >
               {pendingOpen
-                ? <><Icon name="Loader2" size={12} className="animate-spin" /> Ouverture…</>
+                ? <><Icon name="LoaderCircle" size={12} className="animate-spin" /> Ouverture…</>
                 : isDirty
                   ? <><Icon name="Save" size={12} /> Sauvegarder & ouvrir</>
                   : <><Icon name="ExternalLink" size={12} /> Portal live</>}
@@ -513,7 +563,7 @@ export default function PortalEditorPage() {
                 </div>
               )}
 
-              <PortalPreview settings={s} step={previewStep} shop={shop} device={device} chatEnabled={isPro && s.liveChatEnabled} />
+              <PortalPreview settings={{ ...s, ...(texts[textLocale] ?? {}), _strings: PORTAL_STRINGS[textLocale] } as EditorSettings} step={previewStep} shop={shop} device={device} chatEnabled={isPro && s.liveChatEnabled} />
             </div>
           </div>
         </div>
@@ -674,7 +724,7 @@ const DESC_PLACEHOLDERS: Record<string, string> = {
   descConfirm: "One last look before we send this.",
 };
 
-function TextsSection({ s, set, isPro }: { s: EditorSettings; set: SetFn; isPro: boolean }) {
+function TextsSection({ s, set, isPro, defaults }: { s: EditorSettings; set: SetFn; isPro: boolean; defaults: PortalDictionary }) {
   const [tab, setTab] = useState<"steps" | "general">("steps");
   const [editStep, setEditStep] = useState(1);
 
@@ -718,13 +768,13 @@ function TextsSection({ s, set, isPro }: { s: EditorSettings; set: SetFn; isPro:
             <LabelField
               label={`Step ${def.n} — Title`}
               value={(s as any)[def.titleKey]}
-              placeholder={TITLE_PLACEHOLDERS[def.titleKey]}
+              placeholder={defaults[def.titleKey as CustomizableKey]}
               onChange={v => set(def.titleKey as keyof EditorSettings, v)}
             />
             <LabelField
               label={`Step ${def.n} — Description`}
               value={(s as any)[def.descKey]}
-              placeholder={DESC_PLACEHOLDERS[def.descKey]}
+              placeholder={defaults[def.descKey as CustomizableKey]}
               onChange={v => set(def.descKey as keyof EditorSettings, v)}
             />
             {def.extra.map(e => (
@@ -732,7 +782,7 @@ function TextsSection({ s, set, isPro }: { s: EditorSettings; set: SetFn; isPro:
                 key={e.key}
                 label={e.label}
                 value={(s as any)[e.key]}
-                placeholder={e.placeholder}
+                placeholder={defaults[e.key as CustomizableKey]}
                 onChange={v => set(e.key as keyof EditorSettings, v)}
               />
             ))}
@@ -774,7 +824,7 @@ function TextsSection({ s, set, isPro }: { s: EditorSettings; set: SetFn; isPro:
             <LabelField
               label="Powered-by text"
               hint={isPro ? "Leave empty to hide (white-label)" : "Pro plan required to customize or hide"}
-              value={isPro ? s.labelPoweredBy : "Secured by TrackBack"}
+              value={isPro ? s.labelPoweredBy : defaults.labelPoweredBy}
               placeholder="Secured by TrackBack"
               onChange={v => isPro && set("labelPoweredBy", v)}
             />
@@ -989,6 +1039,8 @@ function HStepper({ s, step, labels, light = false }: { s: EditorSettings; step:
 // ── Layout: Classic ───────────────────────────────────────────────────────────
 
 const STEP_LABELS_DEFAULT = ["Find Order", "Select Items", "Reason", "Refund Type", "Confirm"];
+const stepLabels = (s: EditorSettings) =>
+  s._strings ? [s._strings.stepFind, s._strings.stepItems, s._strings.stepReason, s._strings.stepResolution, s._strings.stepConfirm] : STEP_LABELS_DEFAULT;
 
 function PreviewClassic({ s, step, shop }: { s: EditorSettings; step: number; shop: string }) {
   const storeName = s.portalStoreName || shop.split(".")[0];
@@ -1012,7 +1064,7 @@ function PreviewClassic({ s, step, shop }: { s: EditorSettings; step: number; sh
             )}
             <div>
               <div style={{ fontSize: 14.5, fontWeight: 700, color: "#0f1117", letterSpacing: "-0.01em", lineHeight: 1.15 }}>{storeName}</div>
-              <div style={{ fontSize: 10, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 600, marginTop: 1 }}>Return Center</div>
+              <div style={{ fontSize: 10, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 600, marginTop: 1 }}>{s._strings?.returnCenter ?? "Return Center"}</div>
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "#475569", padding: "6px 11px", borderRadius: 99, background: "rgba(15,23,42,0.04)" }}>
@@ -1022,7 +1074,7 @@ function PreviewClassic({ s, step, shop }: { s: EditorSettings; step: number; sh
         <div style={{ position: "absolute", bottom: -1, left: 0, right: 0, height: 1, background: `linear-gradient(90deg, transparent, ${s.brandColor}, transparent)`, opacity: 0.55 }} />
       </header>
       <div style={{ padding: "24px 24px 28px" }}>
-        <HStepper s={s} step={step} labels={STEP_LABELS_DEFAULT} />
+        <HStepper s={s} step={step} labels={stepLabels(s)} />
         <div style={{
           marginTop: 20,
           background: "#fff",
@@ -1034,7 +1086,7 @@ function PreviewClassic({ s, step, shop }: { s: EditorSettings; step: number; sh
           <StepContent s={s} step={step} />
         </div>
         <div style={{ textAlign: "center", fontSize: 11.5, color: "#94a3b8", marginTop: 18 }}>
-          Need help? <span style={{ textDecoration: "underline", color: s.brandColor, fontWeight: 500 }}>{s.footerContact || `support@${shop.split(".")[0]}.com`}</span>
+          {s._strings?.needHelp ?? "Need help?"} <span style={{ textDecoration: "underline", color: s.brandColor, fontWeight: 500 }}>{s.footerContact || `support@${shop.split(".")[0]}.com`}</span>
           <div style={{ marginTop: 5, fontSize: 10.5, color: "#cbd5e1", display: "inline-flex", alignItems: "center", gap: 4 }}>
             <span>🔒</span> {s.labelPoweredBy || "Secured by TrackBack"}
           </div>
@@ -1066,7 +1118,7 @@ function PreviewMinimal({ s, step, shop }: { s: EditorSettings; step: number; sh
           <span style={{ fontSize: 9.5, fontWeight: 700, color: "#0f1117", textTransform: "uppercase", letterSpacing: "0.14em" }}>
             Step {step} <span style={{ color: "#cbd5e1" }}> / {total}</span>
           </span>
-          <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 500 }}>{STEP_LABELS_DEFAULT[step - 1]}</span>
+          <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 500 }}>{stepLabels(s)[step - 1]}</span>
         </div>
         <div style={{ height: 3, borderRadius: 99, background: "#eef0f4", overflow: "hidden" }}>
           <div style={{ height: "100%", width: `${pct}%`, background: `linear-gradient(90deg, ${s.brandColor}, ${s.brandColor}aa)`, borderRadius: 99, transition: "width 0.4s ease" }} />
@@ -1113,13 +1165,13 @@ function PreviewBold({ s, step, shop }: { s: EditorSettings; step: number; shop:
             )}
             <div>
               <div style={{ fontSize: 15, fontWeight: 700, color: "#fff", letterSpacing: "-0.02em", lineHeight: 1.15 }}>{storeName}</div>
-              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 600, marginTop: 1 }}>Return Center</div>
+              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.7)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 600, marginTop: 1 }}>{s._strings?.returnCenter ?? "Return Center"}</div>
             </div>
           </div>
           <span style={{ fontSize: 11, color: "rgba(255,255,255,0.85)", padding: "5px 11px", borderRadius: 99, background: "rgba(255,255,255,0.14)", boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.18)" }}>← {s.labelBackToStore || "Back to store"}</span>
         </div>
         <div style={{ position: "relative" }}>
-          <HStepper s={s} step={step} labels={STEP_LABELS_DEFAULT} light />
+          <HStepper s={s} step={step} labels={stepLabels(s)} light />
         </div>
       </div>
       <div style={{ padding: "0 18px 24px", marginTop: -28 }}>
@@ -1133,7 +1185,7 @@ function PreviewBold({ s, step, shop }: { s: EditorSettings; step: number; shop:
           <StepContent s={s} step={step} />
         </div>
         <div style={{ textAlign: "center", fontSize: 11.5, color: "#94a3b8", marginTop: 18 }}>
-          Need help? <span style={{ textDecoration: "underline", color: s.brandColor, fontWeight: 500 }}>{s.footerContact || `support@${shop.split(".")[0]}.com`}</span>
+          {s._strings?.needHelp ?? "Need help?"} <span style={{ textDecoration: "underline", color: s.brandColor, fontWeight: 500 }}>{s.footerContact || `support@${shop.split(".")[0]}.com`}</span>
           <div style={{ marginTop: 5, fontSize: 10.5, color: "#cbd5e1" }}>🔒 {s.labelPoweredBy || "Secured by TrackBack"}</div>
         </div>
       </div>
@@ -1179,7 +1231,7 @@ function PreviewSidebar({ s, step, shop }: { s: EditorSettings; step: number; sh
           Your return
         </div>
         <div style={{ flex: 1 }}>
-          {STEP_LABELS_DEFAULT.map((label, i) => {
+          {stepLabels(s).map((label, i) => {
             const idx = i + 1;
             const done = idx < step;
             const curr = idx === step;
@@ -1227,7 +1279,7 @@ function PreviewSidebar({ s, step, shop }: { s: EditorSettings; step: number; sh
         <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#94a3b8", marginBottom: 14 }}>
           <span>Returns</span>
           <span style={{ color: "#cbd5e1" }}>/</span>
-          <span style={{ color: "#0f1117", fontWeight: 600 }}>{STEP_LABELS_DEFAULT[step - 1]}</span>
+          <span style={{ color: "#0f1117", fontWeight: 600 }}>{stepLabels(s)[step - 1]}</span>
         </div>
         <div style={{
           background: "#fff",

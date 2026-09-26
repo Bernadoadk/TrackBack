@@ -72,6 +72,63 @@ model ShopSettings {
   liveChatIcon            String          @default("MessageCircle")
   onboardingCompletedAt   DateTime?
   onboardingSkippedAt     DateTime?
+  // ── Languages & portal display ─────────────────────────────────────────
+  defaultLocale           String          @default("en")
+  portalLocales           String          @default("en,fr")
+  portalTexts             Json            @default("{}")
+  portalDisplayMode       String          @default("embedded")
+  // ── Eligibility rules ──────────────────────────────────────────────────
+  returnWindowBasis       String          @default("fulfillment")
+  blockedTags             String          @default("")
+  blockedProductTypes     String          @default("")
+  blockDiscountedItems    Boolean         @default(false)
+  oneReturnPerOrder       Boolean         @default(false)
+  // ── Return methods & fees ──────────────────────────────────────────────
+  returnMethods           String          @default("")
+  storeDropoffInfo        String          @default("")
+  pickupInfo              String          @default("")
+  returnShippingFee       Float           @default(0)
+  restockingFeePercent    Float           @default(0)
+  feeWaivedForStoreCredit Boolean         @default(true)
+  feeWaivedForExchange    Boolean         @default(true)
+  feeExemptReasons        String          @default("")
+  // ── Refunds, exchanges & evidence ──────────────────────────────────────
+  storeCreditMethod       String          @default("auto")
+  allowShopNow            Boolean         @default(false)
+  greenReturnsEnabled     Boolean         @default(false)
+  greenReturnMaxAmount    Float           @default(0)
+  photosEnabled           Boolean         @default(false)
+  codRefundsEnabled       Boolean         @default(true)
+  payoutMethods           String          @default("wave,orange_money,mtn_momo,moov_money,mpesa,bank_transfer,cash")
+  euWithdrawalEnabled     Boolean         @default(false)
+  // ── WhatsApp ───────────────────────────────────────────────────────────
+  whatsappNumber          String          @default("")
+  whatsappNotifyEnabled   Boolean         @default(false)
+  whatsappPhoneNumberId   String          @default("")
+  whatsappAccessToken     String          @default("")
+  whatsappTemplateName    String          @default("")
+  whatsappTemplateLang    String          @default("en")
+  // ── Automations & risk ─────────────────────────────────────────────────
+  autoApproveMaxAmount    Float           @default(0)
+  autoApproveSkipRisky    Boolean         @default(true)
+  autoRefundOnReceive     Boolean         @default(false)
+  autoRefundOriginal      Boolean         @default(false)
+  blockedEmails           String          @default("")
+  riskReturnThreshold     Int             @default(3)
+  // ── Integrations & reporting ───────────────────────────────────────────
+  orderTagsEnabled        Boolean         @default(true)
+  weeklyReportEnabled     Boolean         @default(true)
+  webhookUrl              String          @default("")
+  webhookSecret           String          @default("")
+  webhookLastStatus       String          @default("")
+  webhookLastAt           DateTime?
+  apiKeyHash              String          @default("")
+  apiKeyPrefix            String          @default("")
+  // ── Background jobs bookkeeping ────────────────────────────────────────
+  lastReturnsSyncAt       DateTime?
+  lastMaintenanceAt       DateTime?
+  lastWeeklyReportAt      DateTime?
+  merchantLastSeenAt      DateTime?
   createdAt               DateTime        @default(now())
   updatedAt               DateTime        @updatedAt
   reasons                 ReturnReason[]
@@ -79,11 +136,14 @@ model ShopSettings {
 }
 
 model ReturnReason {
-  id       String       @id @default(cuid())
-  shop     String
-  label    String
-  enabled  Boolean      @default(true)
-  settings ShopSettings @relation(fields: [shop], references: [shop], onDelete: Cascade)
+  id           String       @id @default(cuid())
+  shop         String
+  label        String
+  enabled      Boolean      @default(true)
+  requirePhoto Boolean      @default(false)
+  settings     ShopSettings @relation(fields: [shop], references: [shop], onDelete: Cascade)
+
+  @@index([shop])
 }
 
 model ReturnRequest {
@@ -120,28 +180,63 @@ model ReturnRequest {
   refundId         String?
   storeCreditTxId  String?
   storeCreditCode  String?
+  // ── Request context ────────────────────────────────────────────────────
+  requestType        String       @default("RETURN")
+  locale             String       @default("en")
+  returnMethod       String       @default("ship")
+  keepItem           Boolean      @default(false)
+  itemsTotal         Float        @default(0)
+  feeAmount          Float        @default(0)
+  whatsappOptIn      Boolean      @default(false)
+  // ── Offline (COD / mobile money) payouts ───────────────────────────────
+  isOfflinePayment   Boolean      @default(false)
+  payoutMethod       String?
+  payoutAccount      String?
+  payoutName         String?
+  payoutReference    String?
+  // ── Gift card refunds ──────────────────────────────────────────────────
+  giftCardId         String?
+  giftCardLastChars  String?
+  // ── Risk & processing ──────────────────────────────────────────────────
+  riskLevel          String       @default("")
+  riskReasons        String       @default("")
+  refundProcessingAt DateTime?
+  expiredAt          DateTime?
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
   notes            InternalNote[]
   events           ReturnEvent[]
   items            ReturnItem[]
   settings         ShopSettings   @relation(fields: [shop], references: [shop], onDelete: Cascade)
+
+  @@index([shop, status])
+  @@index([shop, createdAt])
+  @@index([shop, orderId])
+  @@index([shop, customerEmail])
 }
 
 model ReturnItem {
-  id              String        @id @default(cuid())
-  returnRequestId String
-  lineItemId      String?
-  productId       String
-  variantId       String
-  name            String
-  variantName     String
-  quantity        Int
-  price           Float
-  reason          String
-  note            String?
-  imageUrl        String?
-  returnRequest   ReturnRequest @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
+  id                   String        @id @default(cuid())
+  returnRequestId      String
+  lineItemId           String?
+  productId            String
+  variantId            String
+  name                 String
+  variantName          String
+  quantity             Int
+  price                Float
+  reason               String
+  note                 String?
+  imageUrl             String?
+  sku                  String?
+  photos               String        @default("")
+  exchangeVariantId    String?
+  exchangeProductTitle String?
+  exchangeVariantTitle String?
+  exchangeVariantPrice Float?
+  returnRequest        ReturnRequest @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
+
+  @@index([returnRequestId])
 }
 
 model ReturnEvent {
@@ -165,6 +260,8 @@ model InternalNote {
   text            String
   createdAt       DateTime      @default(now())
   returnRequest   ReturnRequest @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
+
+  @@index([returnRequestId])
 }
 
 model EmailTemplate {
@@ -189,6 +286,7 @@ model Conversation {
   unreadByCustomer   Int              @default(0)
   lastMessageAt      DateTime         @default(now())
   lastMessagePreview String?          @default("")
+  lastNotifiedAt     DateTime?
   closed             Boolean          @default(false)
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
@@ -218,8 +316,17 @@ model BillingSubscription {
   shopifyChargeId String?
   status          String    @default("active")
   trialEndsAt     DateTime?
+  lastSyncedAt    DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
+}
+
+/// Fixed-window rate limiter for public endpoints (portal, chat). Keys look
+/// like "find:<ip>" or "chat:<conversationId>". Serverless-safe (DB-backed).
+model RateLimit {
+  key         String   @id
+  count       Int      @default(0)
+  windowStart DateTime @default(now())
 }
 
 enum ConversationType {

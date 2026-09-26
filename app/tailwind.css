@@ -38,6 +38,11 @@
   color-scheme: light;
 }
 
+/* Customer portal: always light, transparent so it blends into storefront iframes */
+:root[data-portal] { color-scheme: light; height: auto; }
+:root[data-portal] body { background: transparent; color: #0f1117; height: auto; }
+:root[data-portal] body::before { display: none; }
+
 @layer base {
   html, body, #root { height: 100%; }
   body {

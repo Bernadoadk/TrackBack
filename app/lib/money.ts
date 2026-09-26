@@ -52,6 +52,7 @@ const ZERO_DECIMAL = new Set([
 export function formatMoney(
   amount: number | string | null | undefined,
   currency: string = "USD",
+  locale?: string,
 ): string {
   const num =
     typeof amount === "number"
@@ -64,7 +65,7 @@ export function formatMoney(
 
   // Try Intl first — gives proper locale-aware formatting (e.g. "1 000 F CFA").
   try {
-    return new Intl.NumberFormat(undefined, {
+    return new Intl.NumberFormat(locale, {
       style: "currency",
       currency: code,
       minimumFractionDigits: decimals,
@@ -73,7 +74,7 @@ export function formatMoney(
   } catch {
     // Fallback: "<symbol><amount>" or "<amount> <code>" if no symbol.
     const symbol = SYMBOL_FALLBACK[code];
-    const formatted = num.toLocaleString(undefined, {
+    const formatted = num.toLocaleString(locale, {
       minimumFractionDigits: decimals,
       maximumFractionDigits: decimals,
     });

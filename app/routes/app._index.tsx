@@ -6,27 +6,78 @@ import { Icon, StatusBadge, Card, PageHeader } from "../components/ui";
 import { syncReturnsForShop } from "../lib/returns-sync.server";
 import { getShopCurrency } from "../lib/shop-currency.server";
 import { formatMoney } from "../lib/money";
+import { getShopPlan } from "../lib/plan.server";
+import { hasFeature } from "../lib/plans";
+import { realReturnAddress } from "../lib/notifications.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
   const shop = session.shop;
 
-  // Pull native Shopify Returns into the local DB so the dashboard reflects
-  // returns created from the Shopify Admin (Orders → Return items) or via
-  // any flow outside the TrackBack portal. Idempotent; safe to call always.
+  // Throttled (10 min) import of returns created directly in the Shopify Admin.
   await syncReturnsForShop(shop, admin);
 
-  const [returnRequests, settings, currency] = await Promise.all([
+  const now = new Date();
+  const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const [grouped, refundedAgg, recent, settings, currency, reasonRows, withdrawalsPending, riskyPending, plan] = await Promise.all([
+    prisma.returnRequest.groupBy({ by: ['status'], where: { shop }, _count: { _all: true } }),
+    prisma.returnRequest.aggregate({
+      where: { shop, status: 'REFUNDED', refundedAt: { gte: firstDayOfMonth } },
+      _sum: { refundAmount: true },
+    }),
     prisma.returnRequest.findMany({
       where: { shop },
-      include: { items: true },
-      orderBy: { createdAt: 'desc' }
+      include: { items: { select: { quantity: true, reason: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
     }),
     prisma.shopSettings.findUnique({ where: { shop } }),
     getShopCurrency(shop, admin),
+    prisma.returnItem.groupBy({
+      by: ['reason'],
+      where: { returnRequest: { shop } },
+      _sum: { quantity: true },
+      orderBy: { _sum: { quantity: 'desc' } },
+      take: 5,
+    }),
+    prisma.returnRequest.count({ where: { shop, requestType: 'WITHDRAWAL', status: 'PENDING' } }),
+    prisma.returnRequest.count({ where: { shop, status: 'PENDING', riskLevel: 'high' } }),
+    getShopPlan(shop),
   ]);
 
-  return { returnRequests, settings, shop, currency };
+  const counts: Record<string, number> = {};
+  let total = 0;
+  for (const g of grouped) {
+    counts[g.status] = g._count._all;
+    total += g._count._all;
+  }
+
+  return {
+    shop,
+    currency,
+    counts,
+    total,
+    refundedThisMonth: refundedAgg._sum.refundAmount ?? 0,
+    withdrawalsPending,
+    riskyPending: hasFeature(plan, 'fraud') ? riskyPending : 0,
+    reasons: reasonRows.map((r) => ({ name: r.reason, count: r._sum.quantity ?? 0 })),
+    recent: recent.map((r) => ({
+      rma: r.rma,
+      order: r.orderName,
+      customer: r.customerName || r.customerEmail.split('@')[0],
+      itemsCount: r.items.reduce((s, i) => s + i.quantity, 0),
+      reason: r.items[0]?.reason || 'N/A',
+      date: new Date(r.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      status: r.status,
+    })),
+    checklist: {
+      onboarding: !!settings?.onboardingCompletedAt,
+      address: !!realReturnAddress(settings?.returnAddress),
+      sender: !!settings?.fromEmail && settings.fromEmail !== 'returns@acmestore.com',
+      logo: !!settings?.logoUrl,
+      methods: !!settings?.returnMethods,
+    },
+  };
 };
 
 function KpiCard({ label, value, sub, subTone, icon, accentColor }: any) {
@@ -62,71 +113,44 @@ function KpiCard({ label, value, sub, subTone, icon, accentColor }: any) {
 }
 
 export default function DashboardPage() {
-  const { returnRequests, settings, shop, currency } = useLoaderData<typeof loader>();
+  const { shop, currency, counts, total, refundedThisMonth, withdrawalsPending, riskyPending, reasons, recent, checklist: cl } = useLoaderData<typeof loader>();
   const location = useLocation();
+  const search = location.search;
+  const withParam = (path: string, param: string) => `${path}${search}${search ? '&' : '?'}${param}`;
 
-  const pendingCount = returnRequests.filter((r: any) => r.status === 'PENDING').length;
-  const approvedCount = returnRequests.filter((r: any) => r.status === 'APPROVED').length;
-  const shippedCount = returnRequests.filter((r: any) => r.status === 'SHIPPED').length;
-  const expiredCount = returnRequests.filter((r: any) => r.status === 'EXPIRED').length;
-
-  const now = new Date();
-  const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const refundedThisMonth = returnRequests
-    .filter((r: any) => r.status === 'REFUNDED' && new Date(r.updatedAt) >= firstDayOfMonth)
-    .reduce((sum: number, r: any) => sum + r.refundAmount, 0);
+  const pendingCount = counts.PENDING ?? 0;
+  const approvedCount = counts.APPROVED ?? 0;
+  const shippedCount = counts.SHIPPED ?? 0;
+  const receivedCount = counts.RECEIVED ?? 0;
 
   const actionItems = [
-    ...(pendingCount > 0 ? [{ label: `${pendingCount} pending return${pendingCount > 1 ? 's' : ''} awaiting review`, icon: 'Clock', color: '#F59E0B', link: '/app/returns?tab=Pending' }] : []),
-    ...(approvedCount > 0 ? [{ label: `${approvedCount} approved — awaiting customer shipment`, icon: 'Package', color: '#3B82F6', link: '/app/returns?tab=Approved' }] : []),
-    ...(shippedCount > 0 ? [{ label: `${shippedCount} package${shippedCount > 1 ? 's' : ''} in transit`, icon: 'Truck', color: '#10B981', link: '/app/returns?tab=Shipped' }] : []),
-    ...(expiredCount > 0 ? [{ label: `${expiredCount} return${expiredCount > 1 ? 's' : ''} expired — no action needed`, icon: 'TimerOff', color: '#6B7280', link: '/app/returns?tab=Expired' }] : []),
+    ...(pendingCount > 0 ? [{ label: `${pendingCount} pending return${pendingCount > 1 ? 's' : ''} awaiting review`, icon: 'Clock', color: '#F59E0B', link: withParam('/app/returns', 'tab=Pending') }] : []),
+    ...(withdrawalsPending > 0 ? [{ label: `${withdrawalsPending} EU withdrawal${withdrawalsPending > 1 ? 's' : ''} to process (14-day refund deadline)`, icon: 'FileX', color: '#F59E0B', link: withParam('/app/returns', 'tab=Pending') }] : []),
+    ...(riskyPending > 0 ? [{ label: `${riskyPending} pending request${riskyPending > 1 ? 's' : ''} from high-risk customers`, icon: 'ShieldAlert', color: '#EF4444', link: withParam('/app/returns', 'tab=Pending') }] : []),
+    ...(receivedCount > 0 ? [{ label: `${receivedCount} received — ready to refund`, icon: 'PackageCheck', color: '#8B5CF6', link: withParam('/app/returns', 'tab=Received') }] : []),
+    ...(approvedCount > 0 ? [{ label: `${approvedCount} approved — awaiting customer shipment`, icon: 'Package', color: '#3B82F6', link: withParam('/app/returns', 'tab=Approved') }] : []),
+    ...(shippedCount > 0 ? [{ label: `${shippedCount} package${shippedCount > 1 ? 's' : ''} in transit`, icon: 'Truck', color: '#10B981', link: withParam('/app/returns', 'tab=Shipped') }] : []),
   ];
-
-  const recent = returnRequests.slice(0, 5).map((r: any) => ({
-    rma: r.rma,
-    order: r.orderName,
-    customer: r.customerName || r.customerEmail.split('@')[0],
-    email: r.customerEmail,
-    itemsCount: r.items.reduce((s: number, i: any) => s + i.quantity, 0),
-    reason: r.items[0]?.reason || "N/A",
-    date: new Date(r.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-    status: r.status
-  }));
 
   const checklist = [
     { label: 'Install TrackBack', done: true },
-    { label: 'Set return address', done: settings?.returnAddress ? true : false },
-    { label: 'Upload your logo', done: settings?.logoUrl ? true : false },
-    { label: 'Customize return reasons', done: settings ? true : false }, // Simplification
+    { label: 'Complete the setup wizard', done: cl.onboarding },
+    { label: 'Set a real return address', done: cl.address },
+    { label: 'Set your reply-to email', done: cl.sender },
+    { label: 'Choose your return methods', done: cl.methods },
+    { label: 'Upload your logo', done: cl.logo },
   ];
   const completedCount = checklist.filter(c => c.done).length;
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-
-  // Compute top reasons dynamically
-  const reasonCounts: Record<string, number> = {};
-  let totalItems = 0;
-  returnRequests.forEach((r: any) => {
-    r.items.forEach((it: any) => {
-      reasonCounts[it.reason] = (reasonCounts[it.reason] || 0) + it.quantity;
-      totalItems += it.quantity;
-    });
-  });
-
+  const reasonTotal = reasons.reduce((s, r) => s + r.count, 0);
   const colors = ['#6C63FF', '#3B82F6', '#22C55E', '#F59E0B', '#EF4444'];
-  const topReasons = Object.entries(reasonCounts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([name, count], i) => ({
-      name,
-      pct: totalItems > 0 ? Math.round((count / totalItems) * 100) : 0,
-      color: colors[i % colors.length]
-    }));
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title={<>Good morning, {shop.split('.')[0]} <span className="ml-1">👋</span></>}
+        title={<>{greeting}, {shop.split('.')[0]} <span className="ml-1">👋</span></>}
         subtitle={today} />
 
       {/* KPI Row */}
@@ -134,7 +158,7 @@ export default function DashboardPage() {
         <KpiCard label="Pending Review" value={pendingCount} sub="Requires action" subTone="warn" icon="Clock" accentColor="#F59E0B" />
         <KpiCard label="In Transit" value={shippedCount} sub="Awaiting receipt" subTone="ok" icon="Truck" accentColor="#10B981" />
         <KpiCard label="Refunded This Month" value={formatMoney(refundedThisMonth, currency)} sub="Total value" subTone="ok" icon="DollarSign" accentColor="#22C55E" />
-        <KpiCard label="Total Returns" value={returnRequests.length} sub="All time" subTone="muted" icon="TrendingDown" accentColor="#6C63FF" />
+        <KpiCard label="Total Returns" value={total} sub="All time" subTone="muted" icon="TrendingDown" accentColor="#6C63FF" />
       </div>
 
       {/* Action items (AfterShip-style to-do) */}
@@ -153,7 +177,7 @@ export default function DashboardPage() {
           </div>
           <div className="space-y-1.5">
             {actionItems.map((item, i) => (
-              <Link key={i} to={`${item.link}${location.search ? location.search : ''}`}
+              <Link key={i} to={item.link}
                 className="flex items-center gap-3 p-3 rounded-lg hover:bg-white/[0.05] transition-all duration-200 ease-smooth group hover:translate-x-[2px]">
                 <div className="w-8 h-8 rounded-lg grid place-content-center shrink-0 transition-transform duration-200 group-hover:scale-110"
                   style={{
@@ -201,7 +225,7 @@ export default function DashboardPage() {
                   <tr>
                     <td colSpan={8} className="py-8 text-center text-muted">No returns yet.</td>
                   </tr>
-                ) : recent.map((r: any) => (
+                ) : recent.map((r) => (
                   <tr key={r.rma}
                     className="border-t border-divider hover:bg-white/[0.025] transition-colors relative group">
                     <td className="py-3 px-5 font-mono text-[12px] text-ink">{r.rma}</td>
@@ -235,6 +259,27 @@ export default function DashboardPage() {
           </div>
         </div>
       </Card>
+
+      {reasons.length > 0 && (
+        <Card title="Top return reasons" subtitle="All time, by number of items">
+          <div className="space-y-2.5">
+            {reasons.map((r, i) => {
+              const pct = reasonTotal > 0 ? Math.round((r.count / reasonTotal) * 100) : 0;
+              return (
+                <div key={r.name}>
+                  <div className="flex items-center justify-between text-[12.5px] mb-1">
+                    <span className="text-ink">{r.name}</span>
+                    <span className="text-muted tabular-nums">{r.count} · {pct}%</span>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-bg overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width: `${pct}%`, background: colors[i % colors.length] }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         {/* Setup checklist */}
@@ -289,7 +334,7 @@ export default function DashboardPage() {
               </li>
             </ul>
             <div className="mt-auto">
-              <Link to="/app/settings?tab=Portal"
+              <Link to={withParam('/app/settings', 'tab=Portal')}
                 className="group inline-flex items-center justify-center gap-2 px-4 h-10 rounded-md text-white text-[13px] font-semibold transition-all rf-press
                             bg-gradient-to-b from-[#7B73FF] to-[#6259EE] hover:from-[#8B85FF] hover:to-[#6C63FF]
                             shadow-[0_1px_0_rgba(255,255,255,0.2)_inset,0_8px_22px_-6px_rgba(108,99,255,0.55)]

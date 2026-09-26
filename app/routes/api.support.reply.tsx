@@ -13,6 +13,7 @@
 
 import type { ActionFunctionArgs } from "react-router";
 import prisma from "../db.server";
+import { safeEqual } from "../lib/tokens.server";
 import {
   getOrCreateSupportConversation,
   previewOf,
@@ -24,7 +25,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   const token = request.headers.get("x-support-token");
-  if (!process.env.SUPPORT_REPLY_TOKEN || token !== process.env.SUPPORT_REPLY_TOKEN) {
+  if (!safeEqual(token, process.env.SUPPORT_REPLY_TOKEN)) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 

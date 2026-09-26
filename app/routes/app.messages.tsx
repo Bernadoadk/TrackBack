@@ -9,7 +9,7 @@ import { PageHeader, Icon, Btn } from "../components/ui";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
-  markMerchantActive(shop);
+  await markMerchantActive(shop);
 
   const conversations = await prisma.conversation.findMany({
     where: { shop, type: "CLIENT" },
@@ -78,6 +78,7 @@ export default function MessagesPage() {
   useEffect(() => {
     let cancelled = false;
     const tick = async () => {
+      if (document.visibilityState !== "visible") return; // paused while the tab is hidden
       try {
         const r = await fetch("/api/chat/conversations");
         if (!r.ok) return;
@@ -141,6 +142,7 @@ export default function MessagesPage() {
   useEffect(() => {
     if (!selectedId) return;
     const id = setInterval(async () => {
+      if (document.visibilityState !== "visible") return;
       try {
         const params = new URLSearchParams({ conversationId: selectedId });
         if (lastTsRef.current) params.set("since", lastTsRef.current);

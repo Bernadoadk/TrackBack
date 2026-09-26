@@ -33,10 +33,14 @@ api_version = "2026-07"
     "returns/close",
     "returns/reopen",
     "returns/update",
-    "returns/process",
-    "refunds/create"
+    "returns/process"
   ]
   uri = "/webhooks/returns"
+
+  # Refunds made directly in the Shopify Admin are reflected in TrackBack.
+  [[webhooks.subscriptions]]
+  topics = [ "refunds/create" ]
+  uri = "/webhooks/refunds/create"
 
   # Fired when a fulfillment is created on an order. We use it to retry any
   # local ReturnRequest rows that couldn't be mirrored to Shopify at portal
@@ -59,7 +63,7 @@ api_version = "2026-07"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_assigned_fulfillment_orders,read_customers,read_draft_orders,read_fulfillments,read_merchant_managed_fulfillment_orders,read_orders,read_products,read_returns,read_store_credit_account_transactions,read_store_credit_accounts,write_draft_orders,write_gift_cards,write_orders,write_products,write_returns,write_store_credit_account_transactions"
+scopes = "read_orders,write_orders,read_returns,write_returns,read_customers,read_products,read_fulfillments,read_assigned_fulfillment_orders,read_merchant_managed_fulfillment_orders,read_draft_orders,write_draft_orders,write_gift_cards,read_store_credit_accounts,read_store_credit_account_transactions,write_store_credit_account_transactions,read_locations"
 
 [auth]
 redirect_urls = [

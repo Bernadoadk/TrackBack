@@ -1,5 +1,5 @@
-import { Links, Meta, Outlet, Scripts, ScrollRestoration, useLoaderData } from "react-router";
-import type { LinksFunction, LoaderFunctionArgs } from "react-router";
+import { Links, Meta, Outlet, Scripts, ScrollRestoration, useLocation } from "react-router";
+import type { LinksFunction } from "react-router";
 import tailwindStyles from "./tailwind.css?url";
 
 export const links: LinksFunction = () => [
@@ -7,32 +7,25 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: tailwindStyles },
 ];
 
-export const loader = ({ request }: LoaderFunctionArgs) => {
-  const url = new URL(request.url);
-  const isPortal = url.pathname === "/portal";
-  // When served through Shopify app proxy, assets are resolved relative to the
-  // Shopify store domain instead of the Vercel app — the <base> tag fixes this.
-  const appUrl = process.env.SHOPIFY_APP_URL || url.origin;
-  return { isPortal, appUrl };
-};
-
 export default function App() {
-  const { isPortal, appUrl } = useLoaderData<typeof loader>();
-
+  // The customer portal is always light and transparent (it can be embedded
+  // in a storefront); the admin follows the merchant's light/dark choice.
+  const isPortal = useLocation().pathname === "/portal";
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning {...(isPortal ? { "data-portal": "", "data-theme": "light" } : {})}>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
-        {isPortal && <base href={appUrl} />}
         <link rel="preconnect" href="https://cdn.shopify.com/" />
-        {/* No-flash: apply persisted theme before paint */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html:
-              "(function(){try{var t=localStorage.getItem('rf_theme');if(t!=='light'&&t!=='dark')t='light';document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','light');}})();",
-          }}
-        />
+        {!isPortal && (
+          /* No-flash: apply persisted theme before paint */
+          <script
+            dangerouslySetInnerHTML={{
+              __html:
+                "(function(){try{var t=localStorage.getItem('rf_theme');if(t!=='light'&&t!=='dark')t='light';document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','light');}})();",
+            }}
+          />
+        )}
         <Meta />
         <Links />
       </head>

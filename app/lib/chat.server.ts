@@ -1,27 +1,41 @@
 import prisma from "../db.server";
 
+/**
+ * Presence + notification throttling are stored in the database (not in
+ * process memory) so they behave correctly on serverless, where every request
+ * may hit a different instance.
+ */
 const MERCHANT_OFFLINE_THRESHOLD_MIN = 5;
 const MIN_MINUTES_BETWEEN_EMAILS = 15;
 
-const merchantLastSeen = new Map<string, number>();
-const lastEmailSentAt = new Map<string, number>();
-
-export function markMerchantActive(shop: string) {
-  merchantLastSeen.set(shop, Date.now());
+/** Records merchant activity (admin inbox / chat API calls). Throttled to 1 write/min. */
+export async function markMerchantActive(shop: string) {
+  try {
+    const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
+    await prisma.shopSettings.updateMany({
+      where: { shop, OR: [{ merchantLastSeenAt: null }, { merchantLastSeenAt: { lt: oneMinuteAgo } }] },
+      data: { merchantLastSeenAt: new Date() },
+    });
+  } catch (e) {
+    console.error("[chat] markMerchantActive failed:", e);
+  }
 }
 
-export function isMerchantOffline(shop: string): boolean {
-  const ts = merchantLastSeen.get(shop);
+export async function isMerchantOffline(shop: string): Promise<boolean> {
+  const s = await prisma.shopSettings.findUnique({ where: { shop }, select: { merchantLastSeenAt: true } });
+  const ts = s?.merchantLastSeenAt?.getTime();
   if (!ts) return true;
   return Date.now() - ts > MERCHANT_OFFLINE_THRESHOLD_MIN * 60 * 1000;
 }
 
-export function shouldSendOfflineEmail(shop: string, conversationId: string): boolean {
-  const key = `${shop}::${conversationId}`;
-  const last = lastEmailSentAt.get(key) ?? 0;
-  if (Date.now() - last < MIN_MINUTES_BETWEEN_EMAILS * 60 * 1000) return false;
-  lastEmailSentAt.set(key, Date.now());
-  return true;
+/** Atomically claims the right to send an offline email for this conversation. */
+export async function claimOfflineEmailSlot(conversationId: string): Promise<boolean> {
+  const cutoff = new Date(Date.now() - MIN_MINUTES_BETWEEN_EMAILS * 60 * 1000);
+  const res = await prisma.conversation.updateMany({
+    where: { id: conversationId, OR: [{ lastNotifiedAt: null }, { lastNotifiedAt: { lt: cutoff } }] },
+    data: { lastNotifiedAt: new Date() },
+  });
+  return res.count > 0;
 }
 
 export async function getOrCreateClientConversation(params: {

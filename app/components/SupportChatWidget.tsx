@@ -69,7 +69,11 @@ export default function SupportChatWidget() {
   // Polling
   useEffect(() => {
     if (!convId) return;
+    let counter = 0;
     const tick = async () => {
+      // Hidden tab: pause. Closed widget: check every 5th tick (~30s).
+      if (document.visibilityState !== "visible") return;
+      if (!openRef.current && counter++ % 5 !== 0) return;
       try {
         const params = new URLSearchParams({ conversationId: convId });
         if (lastTsRef.current) params.set("since", lastTsRef.current);
@@ -293,7 +297,7 @@ export default function SupportChatWidget() {
               aria-label="Send"
             >
               {sending ? (
-                <Icon name="Loader2" size={16} className="animate-spin" />
+                <Icon name="LoaderCircle" size={16} className="animate-spin" />
               ) : (
                 <Icon name="Send" size={15} strokeWidth={2.25} />
               )}

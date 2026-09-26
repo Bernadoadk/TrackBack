@@ -1,23 +1,22 @@
 // GDPR — customers/redact
 //
-// Triggered when a Shopify customer requests deletion of their personal data.
-// The app must permanently delete all PII tied to that customer for the shop.
-//
-// HMAC verification is handled by authenticate.webhook(request).
-// Must return 200 within 5s.
+// Permanently deletes the customer's PII for the shop: return requests
+// (cascade: items + photos references, notes, events) and chat conversations.
+// Awaited so it completes before the function is frozen.
 
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { deleteFromCloudinary } from "../lib/cloudinary.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { shop, topic, payload } = await authenticate.webhook(request);
   console.log(`[webhook] ${topic} for ${shop}`);
-
-  void handleCustomerRedact(shop, payload).catch((e) =>
-    console.error("[webhook customers/redact] handler failed:", e),
-  );
-
+  try {
+    await handleCustomerRedact(shop, payload);
+  } catch (e) {
+    console.error("[webhook customers/redact] handler failed:", e);
+  }
   return new Response();
 };
 
@@ -27,19 +26,27 @@ async function handleCustomerRedact(shop: string, payload: any) {
     console.log("[webhook customers/redact] no customer email in payload — nothing to redact");
     return;
   }
-  const lowered = email.toLowerCase();
+  // Customer-uploaded evidence photos live on Cloudinary: delete them too.
+  const items = await prisma.returnItem.findMany({
+    where: { returnRequest: { shop, customerEmail: { equals: email, mode: "insensitive" } } },
+    select: { photos: true },
+  });
+  const photoUrls = items.flatMap((it) => {
+    try {
+      return JSON.parse(it.photos || "[]") as string[];
+    } catch {
+      return [];
+    }
+  });
+  await Promise.allSettled(photoUrls.slice(0, 100).map((u) => deleteFromCloudinary(u)));
 
-  // Delete return requests and their cascade (items, internal notes)
   const deletedReturns = await prisma.returnRequest.deleteMany({
     where: { shop, customerEmail: { equals: email, mode: "insensitive" } },
   });
-
-  // Delete chat conversation (cascade deletes messages)
   const deletedConvs = await prisma.conversation.deleteMany({
-    where: { shop, type: "CLIENT", customerEmail: lowered },
+    where: { shop, type: "CLIENT", customerEmail: email.toLowerCase() },
   });
-
   console.log(
-    `[webhook customers/redact] redacted ${deletedReturns.count} return(s) and ${deletedConvs.count} conversation(s) for ${email} on ${shop}`,
+    `[webhook customers/redact] redacted ${deletedReturns.count} return(s) and ${deletedConvs.count} conversation(s) on ${shop}`,
   );
 }

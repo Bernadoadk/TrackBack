@@ -1,6 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router";
-import { PageHeader, Icon, useToast } from "../components/ui";
+import { PageHeader, Icon, TierBadge, useToast } from "../components/ui";
+import { ANNUAL_DISCOUNT_PCT, PLANS } from "../lib/plans";
+import { EMAIL_VARIABLES } from "../lib/email-templates";
+import { PAYOUT_METHODS } from "../lib/i18n";
 
 // ─── Sections ─────────────────────────────────────────────────────────────────
 
@@ -30,7 +33,9 @@ const GROUPS: GroupDef[] = [
     icon: "Zap",
     sections: [
       { id: "returns", title: "Managing returns", icon: "Package" },
-      { id: "live-chat", title: "Live chat", icon: "MessageCircle" },
+      { id: "refunds", title: "Refunds & exchanges", icon: "Wallet" },
+      { id: "live-chat", title: "Live chat & WhatsApp", icon: "MessageCircle" },
+      { id: "analytics", title: "Analytics & reports", icon: "ChartLine" },
     ],
   },
   {
@@ -40,6 +45,7 @@ const GROUPS: GroupDef[] = [
       { id: "portal-editor", title: "Portal editor", icon: "Paintbrush" },
       { id: "email-templates", title: "Email templates", icon: "Mail" },
       { id: "settings", title: "Settings", icon: "Settings" },
+      { id: "integrations", title: "Webhooks & API", icon: "Webhook" },
     ],
   },
   {
@@ -47,11 +53,13 @@ const GROUPS: GroupDef[] = [
     icon: "BookOpen",
     sections: [
       { id: "billing", title: "Billing & plans", icon: "CreditCard" },
-      { id: "compliance", title: "GDPR & privacy", icon: "ShieldCheck" },
-      { id: "faq", title: "FAQ", icon: "MessageCircleQuestion" },
+      { id: "compliance", title: "GDPR & EU withdrawal", icon: "ShieldCheck" },
+      { id: "faq", title: "FAQ", icon: "MessageCircleQuestionMark" },
     ],
   },
 ];
+
+const MOBILE_MONEY = PAYOUT_METHODS.filter((m) => m.kind === "phone").map((m) => m.label.en).join(", ");
 
 // Helper: which group contains a given section id?
 function findGroupOfSection(sectionId: string): GroupDef | undefined {
@@ -65,7 +73,6 @@ export default function DocsPage() {
   const [progress, setProgress] = useState(0);
 
   const activeIndex = GROUPS.findIndex((g) => g.label === activeTab);
-  const activeGroup = GROUPS[activeIndex];
   const prevGroup = activeIndex > 0 ? GROUPS[activeIndex - 1] : null;
   const nextGroup = activeIndex < GROUPS.length - 1 ? GROUPS[activeIndex + 1] : null;
 
@@ -151,12 +158,12 @@ export default function DocsPage() {
               Run returns on autopilot.
             </h2>
             <p className="text-[14px] text-muted mt-2 leading-relaxed">
-              TrackBack handles RMA requests, refunds, store credit, exchanges,
-              live chat and analytics — all from your Shopify admin.
+              TrackBack handles return requests, refunds, cash-on-delivery payouts, store credit,
+              gift cards, exchanges, live chat and analytics — in English and French, from your Shopify admin.
             </p>
             <div className="mt-3 flex items-center gap-3 text-[11.5px] text-faint">
               <span className="inline-flex items-center gap-1">
-                <Icon name="Clock3" size={12} /> ~5 min read
+                <Icon name="Clock3" size={12} /> ~8 min read
               </span>
               <span className="w-1 h-1 rounded-full bg-faint" />
               <span className="inline-flex items-center gap-1">
@@ -182,9 +189,9 @@ export default function DocsPage() {
 
           <div className="hidden md:grid grid-cols-2 gap-3 text-center min-w-[220px]">
             <Stat icon="Zap" label="Setup" value="< 5 min" />
-            <Stat icon="Package" label="RMAs" value="Unlimited" />
-            <Stat icon="MessageCircle" label="Chat" value="Built-in" />
-            <Stat icon="Shield" label="GDPR" value="Compliant" />
+            <Stat icon="Languages" label="Languages" value="EN · FR" />
+            <Stat icon="Banknote" label="COD refunds" value="Built-in" />
+            <Stat icon="Shield" label="GDPR & EU" value="Compliant" />
           </div>
         </div>
       </div>
@@ -221,28 +228,27 @@ export default function DocsPage() {
           <>
             <Section id="getting-started" icon="Sparkles" title="Getting started" badge="New here?">
               <p>
-                TrackBack lives inside your Shopify admin. Once installed, your
-                customers can request returns from a branded portal you control,
-                and you process them from this dashboard.
+                TrackBack lives inside your Shopify admin. Customers request returns from a branded
+                portal on your store — in English or French — and you process everything from this
+                dashboard. Every action is mirrored to Shopify's native returns, refunds and inventory.
               </p>
               <Steps>
-                <Step n={1} title="Configure your settings">
-                  Visit <DocLink to="/app/settings">Settings</DocLink> to set your
-                  return window, return address, blocklist and refund options.
+                <Step n={1} title="Finish the setup wizard">
+                  Reply-to email, return address, return window and policy. The address is sent to
+                  customers when you approve a return. Track your progress in the{" "}
+                  <DocLink to="/app">Dashboard</DocLink> checklist.
                 </Step>
-                <Step n={2} title="Customize your portal">
-                  Head to <DocLink to="/app/portal-editor">Portal Editor</DocLink>
-                  {" "}to add your logo, brand colors and tweak the layout.
+                <Step n={2} title="Choose how items come back">
+                  In <DocLink to="/app/settings?tab=Returns%20%26%20fees">Settings → Returns & fees</DocLink>:
+                  customer ships, prepaid label, drop-off in your store or pickup by your courier.
                 </Step>
-                <Step n={3} title="Expose the portal">
-                  In <DocLink to="/app/settings?tab=Portal">Settings → Portal</DocLink>,
-                  copy your portal URL and link it from your storefront navigation
-                  or footer.
+                <Step n={3} title="Pick your resolutions">
+                  In <DocLink to="/app/settings?tab=Refunds">Settings → Refunds</DocLink>: refunds,
+                  cash-on-delivery payouts, store credit with a bonus, gift cards, exchanges and green returns.
                 </Step>
-                <Step n={4} title="Process returns">
-                  Customers submit returns → they appear in{" "}
-                  <DocLink to="/app/returns">Returns</DocLink>. Approve, refund or
-                  ship a label in one click.
+                <Step n={4} title="Put the portal on your store">
+                  In <DocLink to="/app/settings?tab=Portal">Settings → Portal</DocLink>, add the Return
+                  button theme block in one click, or link <Code>/apps/returns</Code> from your menu or footer.
                 </Step>
               </Steps>
               <Callout kind="tip">
@@ -253,32 +259,40 @@ export default function DocsPage() {
 
             <Section id="portal" icon="Globe" title="Customer portal">
               <p>
-                The portal is where customers file return requests. It runs on
-                your store URL (via Shopify App Proxy) and is fully branded.
-              </p>
-              <h4>Exposing your portal</h4>
-              <p>You have three ways to expose it:</p>
-              <ul>
-                <li>
-                  <strong>Link in your store navigation</strong> — add{" "}
-                  <Code>/apps/returns</Code> as a menu item in Shopify
-                  Online Store → Navigation.
-                </li>
-                <li>
-                  <strong>Share a direct URL</strong> — useful for email
-                  campaigns or order confirmations.
-                </li>
-                <li>
-                  <strong>Embed</strong> — paste an iframe snippet on any of your
-                  pages (Webflow, WordPress, Squarespace…).
-                </li>
-              </ul>
-              <p>
-                All snippets are available in{" "}
-                <DocLink to="/app/settings?tab=Portal">Settings → Portal</DocLink>.
+                The portal runs on your store domain at <Code>/apps/returns</Code> (Shopify App Proxy).
+                By default it opens inside your theme, with your header and footer — switch to a
+                full-page portal in <DocLink to="/app/settings">Settings → General</DocLink> if your theme
+                conflicts. It speaks the customer's store language when you enable French.
               </p>
               <h4>The customer flow</h4>
-              <Flow steps={["Find order", "Select items", "Reason", "Refund type", "Confirm"]} />
+              <Flow steps={["Order", "Items", "Reason & photos", "Refund & return method", "Confirm"]} />
+              <ul>
+                <li>Customers find their order with its number and their email — no account needed.</li>
+                <li>
+                  Items that can't be returned are shown with the reason: final sale, discounted,
+                  not shipped yet, already returned or outside the return window.
+                </li>
+                <li>Fees and the store-credit bonus are shown before submitting; the server recalculates everything.</li>
+                <li>
+                  Orders paid on delivery: customers choose where to receive their refund — {MOBILE_MONEY},
+                  bank transfer or cash.
+                </li>
+                <li>
+                  After submitting, customers land on their <strong>return page</strong>: status timeline,
+                  return instructions (address, label, store or pickup) and a form to add tracking.
+                  Every email links back to it.
+                </li>
+              </ul>
+              <h4>Links you can share</h4>
+              <ul>
+                <li><Code>/apps/returns</Code> — start a return</li>
+                <li><Code>/apps/returns?mode=status</Code> — track a return</li>
+                <li><Code>/apps/returns?mode=withdraw</Code> — EU withdrawal form (when enabled)</li>
+              </ul>
+              <Callout kind="info">
+                Selling on another website too? Settings → Portal gives you a direct URL and an iframe
+                snippet for Webflow, WordPress and co.
+              </Callout>
             </Section>
           </>
         )}
@@ -287,20 +301,22 @@ export default function DocsPage() {
           <>
             <Section id="returns" icon="Package" title="Managing returns">
               <p>
-                When a customer submits a return, it lands in{" "}
-                <DocLink to="/app/returns">Returns</DocLink> with status{" "}
-                <Tag>PENDING</Tag>.
+                New requests land in <DocLink to="/app/returns">Returns</DocLink> with status{" "}
+                <Tag>PENDING</Tag> — or are approved right away with auto-approval. Filter by status,
+                period or search, act on several returns at once (approve, reject, mark received) and
+                export the current view to CSV. Bulk actions send the same emails and Shopify updates as
+                single ones.
               </p>
               <h4>Statuses</h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2 not-prose">
                 {[
                   ["PENDING", "Waiting for your review", "#F59E0B"],
-                  ["APPROVED", "Approved — label sent if applicable", "#3B82F6"],
-                  ["SHIPPED", "Customer marked as shipped (tracking added)", "#3B82F6"],
-                  ["RECEIVED", "Items received at your warehouse", "#22C55E"],
-                  ["REFUNDED", "Refund processed via Shopify", "#22C55E"],
-                  ["REJECTED", "Request denied — customer notified", "#EF4444"],
-                  ["EXPIRED", "Auto-expired after grace period", "#5B5F75"],
+                  ["APPROVED", "Return instructions sent — waiting for the parcel", "#3B82F6"],
+                  ["SHIPPED", "Tracking added by the customer or by you", "#10B981"],
+                  ["RECEIVED", "Items received — ready to refund", "#8B5CF6"],
+                  ["REFUNDED", "Refund, credit, gift card or exchange issued", "#22C55E"],
+                  ["REJECTED", "Declined — customer notified with your reason", "#EF4444"],
+                  ["EXPIRED", "Not shipped in time — customer notified", "#6B7280"],
                 ].map(([k, d, c]) => (
                   <div key={k} className="flex items-center gap-2.5 p-3 rounded-md bg-bg/40 border border-border">
                     <span className="text-[11px] font-bold px-2 py-0.5 rounded ring-1 ring-inset"
@@ -311,37 +327,106 @@ export default function DocsPage() {
                   </div>
                 ))}
               </div>
-              <h4>Refund types</h4>
+              <h4>On each return</h4>
               <ul>
-                <li><strong>Original payment</strong> — refund to the card/method used.</li>
-                <li><strong>Store credit</strong> — issue a discount code, optionally with a bonus % (configurable in Settings).</li>
-                <li><strong>Exchange</strong> — let the customer request a different item; you fulfill via a Shopify draft order.</li>
+                <li>A timeline of every step and email, plus internal notes for your team.</li>
+                <li>The customer's photos, reasons and comments for each item.</li>
+                <li>Carrier and tracking number — added by the customer from their return page, or by you.</li>
+                <li>
+                  A risk badge for customers who return often <TierBadge tier="pro" /> — blocklisted
+                  emails can't submit new requests.
+                </li>
               </ul>
+              <Callout kind="tip">
+                Approved returns that are never shipped expire automatically after the delay set in
+                Settings → General, and the customer is notified.
+              </Callout>
             </Section>
 
-            <Section id="live-chat" icon="MessageCircle" title="Live chat" badge="Pro plan">
+            <Section id="refunds" icon="Wallet" title="Refunds & exchanges">
               <p>
-                Customers can chat with you directly from the portal. The
-                merchant inbox lives at <DocLink to="/app/messages">Messages</DocLink>.
+                Once the items are received, click <strong>Issue refund</strong> and choose the resolution.
+                Items are restocked in Shopify and the customer gets an email with the details.
               </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 not-prose">
+                <Feature icon="CreditCard" title="Original payment">
+                  Refunded on the customer's card through Shopify, minus any return fees.
+                </Feature>
+                <Feature icon="Banknote" title="Manual payout (cash on delivery)">
+                  Send the money by mobile money, bank transfer or cash, then record it with its
+                  reference. Shopify records the refund.
+                </Feature>
+                <Feature icon="Coins" title="Store credit · Starter">
+                  Credited to the customer's Shopify store-credit balance, bonus included, and usable at checkout.
+                </Feature>
+                <Feature icon="Gift" title="Gift card · Starter">
+                  A Shopify gift card code emailed to the customer — also works for guest orders.
+                </Feature>
+                <Feature icon="ArrowLeftRight" title="Exchange · Starter">
+                  A Shopify draft order for the replacement, discounted by the returned value. Any extra
+                  is paid through the emailed invoice; a lower price is refunded or credited.
+                </Feature>
+                <Feature icon="ShoppingBag" title="Shop Now · Pro">
+                  Customers exchange for any product of your store, not only another size or color.
+                </Feature>
+              </div>
               <Callout kind="info">
-                Live chat with customers is available on the <strong>Pro</strong>{" "}
-                plan. The merchant-to-support chat (the lifebuoy button bottom-right)
-                works on all plans.
+                <strong>Green returns</strong> <TierBadge tier="starter" /> — below the amount you set,
+                customers keep the item and you refund right after approval. These returns show a
+                “Keep item” badge.
               </Callout>
-              <h4>How it works</h4>
+              <h4>Automations <TierBadge tier="pro" /></h4>
               <ul>
-                <li>Customer clicks the chat bubble at the bottom-right of the portal.</li>
-                <li>Their message lands in your <strong>Messages</strong> inbox with a red unread badge in the sidebar.</li>
-                <li>If you are offline for more than 5 minutes, an email is sent to your store address (configured in Settings → General).</li>
-                <li>Polling refreshes the inbox every 4 seconds in real time.</li>
+                <li>Auto-approve only below a given amount, and never for high-risk customers.</li>
+                <li>Issue store credit and exchanges as soon as the items are marked received — optionally card refunds too.</li>
+                <li>Cash-on-delivery payouts always stay manual: you send the money yourself.</li>
               </ul>
-              <h4>Enabling / disabling</h4>
+              <Callout kind="warn">
+                A return can only be refunded once: TrackBack locks it while the refund runs, so a
+                double click or two teammates can't pay the customer twice.
+              </Callout>
+            </Section>
+
+            <Section id="live-chat" icon="MessageCircle" title="Live chat & WhatsApp" badge="Pro plan">
               <p>
-                Toggle the chat from{" "}
-                <DocLink to="/app/portal-editor">Portal Editor → Live chat</DocLink>.
-                You can also pick the bubble icon (chat, mail, headphones, …).
-                If your plan is below Pro, the toggle is locked.
+                Customers chat with you from the portal; conversations land in{" "}
+                <DocLink to="/app/messages">Messages</DocLink> with an unread badge in the sidebar. If
+                you haven't been active for 5 minutes, the message is also emailed to you.
+              </p>
+              <h4>WhatsApp</h4>
+              <ul>
+                <li>
+                  Add your WhatsApp number in{" "}
+                  <DocLink to="/app/settings?tab=Notifications">Settings → Notifications</DocLink>:
+                  customers get a WhatsApp button on their return page.
+                </li>
+                <li>Each return shows a <strong>WhatsApp</strong> button with a ready-to-send message for its current status.</li>
+                <li>
+                  Optional: automatic WhatsApp updates at every status change through the Meta WhatsApp
+                  Cloud API, with your own WhatsApp Business account and approved template.
+                </li>
+              </ul>
+              <Callout kind="info">
+                Toggle the portal chat and pick its bubble icon in{" "}
+                <DocLink to="/app/portal-editor">Portal Editor → Live chat</DocLink>. The support chat
+                with our team (lifebuoy button, bottom-right) works on every plan.
+              </Callout>
+            </Section>
+
+            <Section id="analytics" icon="ChartLine" title="Analytics & reports">
+              <p>
+                <DocLink to="/app/analytics">Analytics</DocLink> shows the last 7 days on every plan.
+                Starter and Pro add 30- and 90-day views with:
+              </p>
+              <ul>
+                <li><strong>Return rate</strong> — returns compared with your Shopify orders over the period.</li>
+                <li><strong>Retained revenue</strong> — refunds kept in your store as store credit, gift cards or exchanges.</li>
+                <li>Resolutions, reasons, top returned products, processing time and fees collected.</li>
+              </ul>
+              <p>
+                With the <strong>weekly report</strong> <TierBadge tier="starter" />, a summary of the
+                past week lands in your inbox every Monday. Need raw data? Use <strong>Export CSV</strong>{" "}
+                on the Returns page — it exports the current filters.
               </p>
             </Section>
           </>
@@ -349,71 +434,108 @@ export default function DocsPage() {
 
         {activeTab === "Customize" && (
           <>
-            <Section id="portal-editor" icon="Paintbrush" title="Portal editor">
+            <Section id="portal-editor" icon="Paintbrush" title="Portal editor" badge="Starter+">
               <p>
-                Match the portal to your brand. Live preview on the right
-                reflects every change.
+                Match the portal to your brand. The live preview on the right reflects every change.
               </p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 not-prose">
+                <Feature icon="LayoutTemplate" title="Layouts">
+                  Classic, minimal, bold, sidebar or compact.
+                </Feature>
                 <Feature icon="Palette" title="Theme">
-                  Brand color, header background.
+                  Brand color, header background and logo.
                 </Feature>
-                <Feature icon="Store" title="Header">
-                  Store name and logo (upload to Cloudinary).
+                <Feature icon="Languages" title="Texts per language">
+                  Customize every label, description and button in English and French.
                 </Feature>
-                <Feature icon="Type" title="Texts">
-                  Customize every label, description and CTA.
-                </Feature>
-                <Feature icon="MessageCircle" title="Live chat">
-                  Enable/disable the in-portal chat widget and pick its bubble icon (Pro plan).
+                <Feature icon="MessageCircle" title="Live chat · Pro">
+                  Enable the in-portal chat and pick its bubble icon.
                 </Feature>
               </div>
               <Callout kind="tip">
-                Hit <Kbd>Save</Kbd> to publish. Customers see the new portal
-                instantly — no rebuild required.
+                Hit <Kbd>Save</Kbd> to publish. Customers see the new portal instantly. On Pro, the
+                white-label option removes the “Secured by TrackBack” mention.
               </Callout>
             </Section>
 
             <Section id="email-templates" icon="Mail" title="Email templates" badge="Starter+">
               <p>
-                Every status change can trigger an email to the customer.
-                Templates support variables like{" "}
-                <Code>{`{{customer_name}}`}</Code>, <Code>{`{{rma_number}}`}</Code>,{" "}
-                <Code>{`{{order_number}}`}</Code>, <Code>{`{{refund_amount}}`}</Code>.
+                Eight emails, each in English and French: <strong>request received</strong>,{" "}
+                <strong>approved</strong> (with the return instructions), <strong>rejected</strong>,{" "}
+                <strong>shipped</strong>, <strong>received</strong>, <strong>refunded</strong>,{" "}
+                <strong>expired</strong> and the <strong>EU withdrawal acknowledgment</strong>.
+                Customers receive the language they used in the portal, and their replies go to your
+                reply-to address. On Free, the built-in templates are sent.
               </p>
               <p>
-                Edit templates in{" "}
-                <DocLink to="/app/email-templates">Email templates</DocLink>.
-                Available types:
+                Edit them in <DocLink to="/app/email-templates">Email templates</DocLink>. Available variables:
               </p>
-              <ul>
-                <li><strong>Request Received</strong> — confirmation right after a customer files a return.</li>
-                <li><strong>Approved</strong> — sent when you approve a return (optionally with a shipping label).</li>
-                <li><strong>Rejected</strong> — sent when you reject, with reason.</li>
-                <li><strong>Refunded</strong> — sent when the refund is processed (with store credit code if applicable).</li>
-                <li><strong>Shipped</strong> — sent when the customer adds tracking from the portal.</li>
-              </ul>
+              <div className="not-prose flex flex-wrap gap-1.5 my-3">
+                {EMAIL_VARIABLES.map((v) => (
+                  <Code key={v}>{`{{${v}}}`}</Code>
+                ))}
+              </div>
+              <Callout kind="tip">
+                <Code>{`{{return_instructions}}`}</Code> adapts to the chosen method (address, label,
+                store or pickup) and <Code>{`{{refund_details}}`}</Code> to the resolution (gift card code,
+                payout reference…).
+              </Callout>
             </Section>
 
             <Section id="settings" icon="Settings" title="Settings">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 not-prose">
-                <Feature icon="Settings2" title="General">
-                  Return window, auto-approve, blocklist, sender email,
-                  refund options (store credit, exchanges, bonus %).
-                </Feature>
-                <Feature icon="Tag" title="Reasons">
-                  Custom return reasons shown to customers.
-                </Feature>
-                <Feature icon="Mail" title="Emails">
-                  Customize every email template (see above).
-                </Feature>
-                <Feature icon="FileText" title="Policy">
-                  Edit your public return policy displayed on the portal.
-                </Feature>
-                <Feature icon="Globe" title="Portal">
-                  Get your portal URL, embed code, and the theme block link.
-                </Feature>
+                <FeatureLink to="/app/settings?tab=General" icon="Settings2" title="General">
+                  Return window, address, reply-to email, languages, portal display, auto-approval and automations.
+                </FeatureLink>
+                <FeatureLink to="/app/settings?tab=Eligibility" icon="ShieldCheck" title="Eligibility">
+                  Final-sale SKUs, tags and product types, discounted items, one return per order, fraud protection.
+                </FeatureLink>
+                <FeatureLink to="/app/settings?tab=Returns%20%26%20fees" icon="Truck" title="Returns & fees">
+                  Return methods (ship, label, store, pickup), restocking and return shipping fees.
+                </FeatureLink>
+                <FeatureLink to="/app/settings?tab=Refunds" icon="Wallet" title="Refunds">
+                  Store credit and bonus, gift cards, exchanges, green returns, photos, cash-on-delivery payouts.
+                </FeatureLink>
+                <FeatureLink to="/app/settings?tab=Reasons" icon="Tag" title="Reasons">
+                  Your own return reasons, with photos required per reason.
+                </FeatureLink>
+                <FeatureLink to="/app/settings?tab=Policy" icon="FileText" title="Policy">
+                  Return policy shown in the portal and the EU withdrawal button.
+                </FeatureLink>
+                <FeatureLink to="/app/settings?tab=Notifications" icon="Bell" title="Notifications">
+                  WhatsApp, weekly report and Shopify order tags.
+                </FeatureLink>
+                <FeatureLink to="/app/settings?tab=Integrations" icon="Webhook" title="Integrations">
+                  Signed webhooks and REST API keys.
+                </FeatureLink>
+                <FeatureLink to="/app/settings?tab=Portal" icon="Globe" title="Portal">
+                  Theme block, portal links and embed code.
+                </FeatureLink>
               </div>
+            </Section>
+
+            <Section id="integrations" icon="Webhook" title="Webhooks & API" badge="Pro plan">
+              <h4>Webhooks</h4>
+              <p>
+                Add an HTTPS endpoint in{" "}
+                <DocLink to="/app/settings?tab=Integrations">Settings → Integrations</DocLink>. TrackBack
+                sends a JSON <Code>POST</Code> for <Code>return.created</Code>, <Code>return.approved</Code>,{" "}
+                <Code>return.rejected</Code>, <Code>return.shipped</Code>, <Code>return.received</Code>,{" "}
+                <Code>return.refunded</Code> and <Code>return.expired</Code>.
+              </p>
+              <p>
+                Each request carries <Code>X-TrackBack-Event</Code> and{" "}
+                <Code>X-TrackBack-Signature: sha256=…</Code> — the HMAC-SHA256 of the raw body with your
+                signing secret. Use <strong>Send test event</strong> to check your endpoint.
+              </p>
+              <h4>REST API</h4>
+              <p>Generate a key in the same tab, then read your returns from your ERP, WMS or spreadsheet:</p>
+              <CodeBlock>{`GET /api/v1/returns?status=PENDING&updated_since=2026-01-01T00:00:00Z&limit=50
+GET /api/v1/returns/{rma}
+Authorization: Bearer tb_live_…`}</CodeBlock>
+              <Callout kind="info">
+                The key is shown once — store it safely. Regenerating it revokes the previous one.
+              </Callout>
             </Section>
           </>
         )}
@@ -422,66 +544,83 @@ export default function DocsPage() {
           <>
             <Section id="billing" icon="CreditCard" title="Billing & plans">
               <p>
-                Manage your subscription from{" "}
-                <DocLink to="/app/billing">Billing</DocLink>. Plans use Shopify's
-                native billing API — you pay through your Shopify invoice.
+                Manage your subscription from <DocLink to="/app/billing">Billing</DocLink>. Plans use
+                Shopify's native billing — you pay through your Shopify invoice. Annual plans save{" "}
+                {ANNUAL_DISCOUNT_PCT}%.
               </p>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 not-prose">
-                <PlanCard name="Free" price="$0" features={["10 returns/mo", "Email notifications", "Basic analytics"]} />
-                <PlanCard name="Starter" price="$19" features={["100 returns/mo", "Branding & logo", "Email templates", "Advanced analytics"]} popular />
-                <PlanCard name="Pro" price="$49" features={["Unlimited returns", "Live chat with customers", "API access", "White-label portal"]} />
+                {PLANS.map((p) => (
+                  <PlanCard
+                    key={p.id}
+                    name={`${p.name} · ${p.summary}`}
+                    price={`$${p.price}`}
+                    note={p.annualPrice ? `or $${p.annualPrice}/year` : "Free forever"}
+                    features={p.features}
+                    popular={p.popular}
+                  />
+                ))}
               </div>
               <Callout kind="info">
-                No trial period — you pay only for the months you use. Cancel anytime
-                and you'll be downgraded back to Free at the end of the current billing cycle.
+                The monthly limit counts return requests (EU withdrawals are never blocked). When it's
+                reached, the portal asks customers to contact you until next month or until you upgrade.
+                Downgrading keeps your data and settings; features above your plan are simply locked.
               </Callout>
             </Section>
 
-            <Section id="compliance" icon="ShieldCheck" title="GDPR & privacy">
-              <p>
-                TrackBack is built with mandatory Shopify compliance webhooks:
-              </p>
+            <Section id="compliance" icon="ShieldCheck" title="GDPR & EU withdrawal">
+              <p>TrackBack handles Shopify's mandatory privacy webhooks:</p>
               <ul>
                 <li>
-                  <Code>customers/data_request</Code> — when a customer asks for
-                  a copy of their data, we email the merchant a structured export
-                  of all RMAs and chat messages we hold for that customer.
+                  <Code>customers/data_request</Code> — we email your reply-to address a structured export
+                  of the customer's returns, payout details, photos and chat messages.
                 </li>
                 <li>
-                  <Code>customers/redact</Code> — when a customer requests
-                  deletion, we permanently remove all their data tied to your shop.
+                  <Code>customers/redact</Code> — we delete the customer's returns, photos and conversations.
                 </li>
                 <li>
-                  <Code>shop/redact</Code> — 48h after app uninstall, we delete
-                  all data tied to your shop.
+                  <Code>shop/redact</Code> — 48h after uninstall, all data tied to your shop is deleted.
                 </li>
               </ul>
               <p>
-                All webhooks are HMAC-verified using your app's secret. We never
+                All webhooks are HMAC-verified. Payout account numbers are masked in emails, and we never
                 store payment card data — billing is fully handled by Shopify.
+              </p>
+              <h4>EU withdrawal button</h4>
+              <p>
+                Since 19 June 2026 (Directive 2023/2673), stores selling to EU consumers must offer an
+                online withdrawal function. Enable it in{" "}
+                <DocLink to="/app/settings?tab=Policy">Settings → Policy</DocLink>, then add a footer link
+                “Withdraw from contract here” to <Code>/apps/returns?mode=withdraw</Code>. Customers
+                confirm in two steps without an account and immediately receive an acknowledgment email;
+                you'll find the request in Returns.
               </p>
             </Section>
 
-            <Section id="faq" icon="MessageCircleQuestion" title="FAQ">
-              <Faq q="Can I import historical returns?">
-                Not yet. We're working on a CSV import — reach out via the chat
-                button if you need this urgently.
+            <Section id="faq" icon="MessageCircleQuestionMark" title="FAQ">
+              <Faq q="My customers pay on delivery — how do refunds work?">
+                They enter their mobile money number or bank details in the portal. You send the money,
+                then click <strong>Issue refund → Manual payout</strong> and add the transaction reference.
+                Shopify records the refund, the items are restocked and the customer is notified.
               </Faq>
-              <Faq q="Does TrackBack handle international returns?">
-                Yes. You can configure your return address in Settings → General.
-                Shipping label generation depends on your carrier integration.
+              <Faq q="Can customers exchange for another size?">
+                Yes, on Starter and Pro: they pick the replacement variant in the portal and out-of-stock
+                options are disabled. Pro adds “Shop Now” to exchange for any product.
               </Faq>
-              <Faq q="Can I auto-approve all returns?">
-                Yes. Toggle <strong>Auto-approve returns</strong> in Settings →
-                General. Useful for low-fraud product categories.
+              <Faq q="Why can't a customer find an older order?">
+                Shopify only gives apps access to the last 60 days of orders by default. Keep your return
+                window within 60 days, or contact us if you need longer windows.
+              </Faq>
+              <Faq q="Can I auto-approve returns?">
+                Yes, on every plan: turn on <strong>Auto-approve returns</strong> in Settings → General.
+                Pro adds conditions (maximum amount, skip high-risk customers) and automatic refunds on receipt.
               </Faq>
               <Faq q="What happens when I uninstall the app?">
-                Your data is kept for 48 hours, then permanently deleted per
-                Shopify's mandatory <Code>shop/redact</Code> webhook.
+                Your data is kept for 48 hours, then permanently deleted per Shopify's mandatory{" "}
+                <Code>shop/redact</Code> webhook.
               </Faq>
               <Faq q="How do I contact support?">
-                Click the lifebuoy button at the bottom-right of any admin
-                page. Our team will reply within a few hours via the chat.
+                Click the lifebuoy button at the bottom-right of any admin page. Our team will reply
+                within a few hours via the chat.
               </Faq>
             </Section>
           </>
@@ -663,7 +802,23 @@ function Feature({ icon, title, children }: { icon: string; title: string; child
   );
 }
 
-function PlanCard({ name, price, features, popular }: { name: string; price: string; features: string[]; popular?: boolean }) {
+function FeatureLink({ to, icon, title, children }: { to: string; icon: string; title: string; children: ReactNode }) {
+  return (
+    <Link to={to} className="block">
+      <Feature icon={icon} title={title}>{children}</Feature>
+    </Link>
+  );
+}
+
+function CodeBlock({ children }: { children: string }) {
+  return (
+    <pre className="not-prose my-4 p-3.5 rounded-lg bg-[#0f1117] border border-border text-[#e2e8f0] font-mono text-[11.5px] leading-relaxed overflow-x-auto">
+      {children}
+    </pre>
+  );
+}
+
+function PlanCard({ name, price, note, features, popular }: { name: string; price: string; note?: string; features: string[]; popular?: boolean }) {
   return (
     <div
       className={`p-4 rounded-lg border transition-all duration-200 hover:translate-y-[-2px] ${popular ? "border-accent shadow-[0_0_0_1px_rgba(108,99,255,0.3),0_10px_30px_-10px_rgba(108,99,255,0.3)]" : "border-border bg-bg/40"
@@ -679,6 +834,7 @@ function PlanCard({ name, price, features, popular }: { name: string; price: str
       <div className="text-[22px] font-bold text-ink mt-0.5">
         {price}<span className="text-[12px] font-normal text-muted">/mo</span>
       </div>
+      {note && <div className="text-[11px] text-muted mt-0.5">{note}</div>}
       <ul className="mt-3 space-y-1.5">
         {features.map((f) => (
           <li key={f} className="flex items-start gap-1.5 text-[12px] text-ink">

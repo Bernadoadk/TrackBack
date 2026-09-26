@@ -4,90 +4,145 @@ import { useLoaderData, Link, useLocation } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { PageHeader, Card } from "../components/ui";
-import { syncBillingFromShopify } from "../lib/plan.server";
+import { ensureBillingSynced } from "../lib/plan.server";
+import { hasFeature } from "../lib/plans";
 import { getShopCurrency } from "../lib/shop-currency.server";
 import { formatMoney } from "../lib/money";
+import { countOrders } from "../lib/shopify-queries.server";
 
 const ANALYTICS_COLORS = ['#6C63FF','#EF4444','#F59E0B','#3B82F6','#8B5CF6'];
+const RESOLUTION_META: Record<string, { label: string; color: string }> = {
+  ORIGINAL_PAYMENT: { label: 'Original payment', color: '#8B8FA8' },
+  MANUAL: { label: 'Manual payout (COD)', color: '#F59E0B' },
+  STORE_CREDIT: { label: 'Store credit', color: '#6C63FF' },
+  GIFT_CARD: { label: 'Gift card', color: '#EC4899' },
+  EXCHANGE: { label: 'Exchange', color: '#3B82F6' },
+};
 
-function computePeriod(requests: any[], days: number) {
+type Req = {
+  createdAt: Date;
+  refundedAt: Date | null;
+  status: string;
+  refundType: string;
+  refundAmount: number;
+  feeAmount: number;
+  items: { name: string; reason: string; quantity: number; price: number }[];
+};
+
+function computePeriod(requests: Req[], days: number, ordersInPeriod: number | null) {
   const now = new Date();
   const cutoff = new Date(now.getTime() - days * 86400000);
-  const filtered = requests.filter(r => new Date(r.createdAt) >= cutoff);
+  const filtered = requests.filter(r => r.createdAt >= cutoff);
 
   const chart: number[] = Array(days).fill(0);
   filtered.forEach(r => {
-    const diff = Math.floor((now.getTime() - new Date(r.createdAt).getTime()) / 86400000);
+    const diff = Math.floor((now.getTime() - r.createdAt.getTime()) / 86400000);
     if (diff < days) chart[days - 1 - diff]++;
   });
 
   const total = filtered.length;
-  const refunded = filtered.filter((r: any) => r.status === 'REFUNDED');
-  const totalRefunded = refunded.reduce((s: number, r: any) => s + r.refundAmount, 0);
-
-  // Retained revenue = value that stayed in the store (store credit + exchange)
+  const refunded = filtered.filter(r => r.status === 'REFUNDED');
+  const cashRefunded = refunded
+    .filter(r => r.refundType === 'ORIGINAL_PAYMENT' || r.refundType === 'MANUAL')
+    .reduce((s, r) => s + r.refundAmount, 0);
   const retainedRevenue = refunded
-    .filter((r: any) => r.refundType === 'STORE_CREDIT' || r.refundType === 'EXCHANGE')
-    .reduce((s: number, r: any) => s + r.refundAmount, 0);
-  const retainedRatio = total > 0 ? Math.round((retainedRevenue / Math.max(totalRefunded + retainedRevenue, 1)) * 100) : 0;
+    .filter(r => r.refundType === 'STORE_CREDIT' || r.refundType === 'GIFT_CARD' || r.refundType === 'EXCHANGE')
+    .reduce((s, r) => s + r.refundAmount, 0);
+  const retainedRatio = cashRefunded + retainedRevenue > 0 ? Math.round((retainedRevenue / (cashRefunded + retainedRevenue)) * 100) : 0;
+  const feesCollected = refunded.reduce((s, r) => s + (r.feeAmount || 0), 0);
 
-  const closed = filtered.filter((r: any) => ['REFUNDED','REJECTED','RECEIVED'].includes(r.status));
-  const avgProcessingDays = closed.length > 0
-    ? closed.reduce((s: number, r: any) => s + (new Date(r.updatedAt).getTime() - new Date(r.createdAt).getTime()), 0) / closed.length / 86400000
+  const withTime = refunded.filter(r => r.refundedAt);
+  const avgProcessingDays = withTime.length > 0
+    ? withTime.reduce((s, r) => s + (r.refundedAt!.getTime() - r.createdAt.getTime()), 0) / withTime.length / 86400000
     : 0;
-  const exchangeCount = filtered.filter((r: any) => r.refundType === 'EXCHANGE').length;
+  const exchangeCount = filtered.filter(r => r.refundType === 'EXCHANGE').length;
   const exchangeRate = total > 0 ? Math.round((exchangeCount / total) * 100) : 0;
 
-  const reasonMap: Record<string, number> = {};
+  const reasonMap: Record<string, { count: number; value: number }> = {};
   let totalItems = 0;
-  filtered.forEach((r: any) => r.items.forEach((it: any) => {
-    reasonMap[it.reason] = (reasonMap[it.reason] || 0) + it.quantity;
+  filtered.forEach(r => r.items.forEach(it => {
+    const e = reasonMap[it.reason] ?? (reasonMap[it.reason] = { count: 0, value: 0 });
+    e.count += it.quantity;
+    e.value += it.price * it.quantity;
     totalItems += it.quantity;
   }));
   const topReasons = Object.entries(reasonMap)
-    .sort((a, b) => b[1] - a[1]).slice(0, 5)
-    .map(([name, count], i) => ({ name, count, pct: totalItems > 0 ? Math.round((count / totalItems) * 100) : 0, color: ANALYTICS_COLORS[i % ANALYTICS_COLORS.length] }));
+    .sort((a, b) => b[1].count - a[1].count).slice(0, 6)
+    .map(([name, v], i) => ({ name, count: v.count, value: Math.round(v.value * 100) / 100, pct: totalItems > 0 ? Math.round((v.count / totalItems) * 100) : 0, color: ANALYTICS_COLORS[i % ANALYTICS_COLORS.length] }));
 
-  const productMap: Record<string, number> = {};
-  filtered.forEach((r: any) => r.items.forEach((it: any) => {
-    productMap[it.name] = (productMap[it.name] || 0) + it.quantity;
+  const productMap: Record<string, { count: number; value: number }> = {};
+  filtered.forEach(r => r.items.forEach(it => {
+    const e = productMap[it.name] ?? (productMap[it.name] = { count: 0, value: 0 });
+    e.count += it.quantity;
+    e.value += it.price * it.quantity;
   }));
-  const topProducts = Object.entries(productMap).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, count]) => ({ name, count }));
+  const topProducts = Object.entries(productMap).sort((a, b) => b[1].count - a[1].count).slice(0, 5)
+    .map(([name, v]) => ({ name, count: v.count, value: Math.round(v.value * 100) / 100 }));
 
-  return { total, totalRefunded: Math.round(totalRefunded * 100) / 100, retainedRevenue: Math.round(retainedRevenue * 100) / 100, retainedRatio, avgProcessingDays: Math.round(avgProcessingDays * 10) / 10, exchangeRate, chart, topReasons, topProducts, totalItems };
+  const resolutionMap: Record<string, { count: number; amount: number }> = {};
+  refunded.forEach(r => {
+    const e = resolutionMap[r.refundType] ?? (resolutionMap[r.refundType] = { count: 0, amount: 0 });
+    e.count++;
+    e.amount += r.refundAmount;
+  });
+  const resolutions = Object.entries(resolutionMap).sort((a, b) => b[1].count - a[1].count)
+    .map(([type, v]) => ({ type, count: v.count, amount: Math.round(v.amount * 100) / 100 }));
+
+  const returnRate = ordersInPeriod && ordersInPeriod > 0 ? Math.round((total / ordersInPeriod) * 1000) / 10 : null;
+
+  return {
+    total,
+    totalRefunded: Math.round(cashRefunded * 100) / 100,
+    retainedRevenue: Math.round(retainedRevenue * 100) / 100,
+    retainedRatio,
+    feesCollected: Math.round(feesCollected * 100) / 100,
+    avgProcessingDays: Math.round(avgProcessingDays * 10) / 10,
+    exchangeRate,
+    returnRate,
+    chart, topReasons, topProducts, resolutions, totalItems,
+  };
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
   const shop = session.shop;
+  const since90 = new Date(Date.now() - 90 * 86400000);
 
-  // Sync directly with Shopify to avoid races with the parent app.tsx loader.
-  const [returnRequests, plan, currency] = await Promise.all([
-    prisma.returnRequest.findMany({ where: { shop }, include: { items: true }, orderBy: { createdAt: 'desc' } }),
-    syncBillingFromShopify(admin, shop),
+  const [rows, plan, currency] = await Promise.all([
+    prisma.returnRequest.findMany({
+      where: { shop, createdAt: { gte: since90 } },
+      select: {
+        createdAt: true, refundedAt: true, status: true, refundType: true, refundAmount: true, feeAmount: true,
+        items: { select: { name: true, reason: true, quantity: true, price: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    }),
+    ensureBillingSynced(admin, shop),
     getShopCurrency(shop, admin),
   ]);
 
-  const isStarter = plan === 'starter' || plan === 'pro';
+  const advanced = hasFeature(plan, 'advancedAnalytics');
+  const iso = (days: number) => new Date(Date.now() - days * 86400000).toISOString();
+  const [o30, o90] = advanced ? await Promise.all([countOrders(admin, iso(30)), countOrders(admin, iso(90))]) : [null, null];
 
   return {
-    plan,
+    advanced,
     currency,
-    p7:  computePeriod(returnRequests, 7),
-    p30: isStarter ? computePeriod(returnRequests, 30) : null,
-    p90: isStarter ? computePeriod(returnRequests, 90) : null,
+    p7: computePeriod(rows, 7, null),
+    p30: advanced ? computePeriod(rows, 30, o30) : null,
+    p90: advanced ? computePeriod(rows, 90, o90) : null,
   };
 };
 
 export default function AnalyticsPage() {
-  const { p7, p30, p90, plan, currency } = useLoaderData<typeof loader>();
-  const isStarter = plan === 'starter' || plan === 'pro';
+  const { p7, p30, p90, advanced, currency } = useLoaderData<typeof loader>();
+  const isStarter = advanced;
   const [period, setPeriod] = useState(isStarter ? '30 days' : '7 days');
   const location = useLocation();
   const billingHref = `/app/billing${location.search}`;
 
   const pd = period === '7 days' ? p7 : period === '90 days' ? (p90 ?? p7) : (p30 ?? p7);
-  const { total, totalRefunded, retainedRevenue, retainedRatio, avgProcessingDays, exchangeRate, chart, topReasons, topProducts } = pd;
+  const { total, totalRefunded, retainedRevenue, retainedRatio, avgProcessingDays, exchangeRate, chart, topReasons, topProducts, resolutions, returnRate, feesCollected } = pd;
 
   const data = chart;
   const max = Math.max(...data, 1);
@@ -110,6 +165,7 @@ export default function AnalyticsPage() {
   const peakValue = Math.max(...data);
   const peakDay = data.indexOf(peakValue) + 1;
   const periodLabel = period === '7 days' ? 'Last 7 days' : period === '90 days' ? 'Last 90 days' : 'Last 30 days';
+  const resolutionTotal = resolutions.reduce((s, r) => s + r.count, 0);
 
   return (
     <div className="space-y-6">
@@ -151,10 +207,14 @@ export default function AnalyticsPage() {
 
       {/* KPI row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <MiniKpi label="Total Returns"       value={String(total)}                        delta={total > 0 ? 'in period' : 'No returns yet'} tone="muted" />
-        <MiniKpi label="Refund Issued"       value={formatMoney(totalRefunded, currency)}       delta="cash refunded"     tone={totalRefunded > 0 ? 'warn' : 'ok'} />
-        <MiniKpi label="Retained Revenue"    value={formatMoney(retainedRevenue, currency)}     delta={`${retainedRatio}% of refunds`} tone="ok" />
-        <MiniKpi label="Exchange Rate"       value={`${exchangeRate}%`}                   delta="of all returns"  tone="ok" />
+        <MiniKpi label="Total Returns" value={String(total)} delta={total > 0 ? 'in period' : 'No returns yet'} tone="muted" />
+        <MiniKpi label="Return Rate" value={returnRate === null ? '—' : `${returnRate}%`} delta={returnRate === null ? (advanced ? 'no orders' : 'Starter plan') : 'of orders'} tone={returnRate !== null && returnRate > 15 ? 'warn' : 'ok'} />
+        <MiniKpi label="Cash Refunded" value={formatMoney(totalRefunded, currency)} delta="card + manual" tone={totalRefunded > 0 ? 'warn' : 'ok'} />
+        <MiniKpi label="Retained Revenue" value={formatMoney(retainedRevenue, currency)} delta={`${retainedRatio}% of refunds`} tone="ok" />
+        <MiniKpi label="Exchange Rate" value={`${exchangeRate}%`} delta="of all returns" tone="ok" />
+        <MiniKpi label="Avg. Processing" value={avgProcessingDays > 0 ? `${avgProcessingDays} d` : '—'} delta="request → refund" tone="muted" />
+        <MiniKpi label="Fees Collected" value={formatMoney(feesCollected, currency)} delta="restocking + shipping" tone="muted" />
+        <MiniKpi label="Items Returned" value={String(pd.totalItems)} delta="units" tone="muted" />
       </div>
 
       {/* Retained revenue highlight */}
@@ -246,7 +306,7 @@ export default function AnalyticsPage() {
 
       {/* Tables */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card title="Top Returned Products" subtitle="Most-returned items all time">
+        <Card title="Top Returned Products" subtitle={periodLabel}>
           {topProducts.length === 0 ? (
             <div className="py-6 text-center text-muted text-[13px]">No products yet.</div>
           ) : (
@@ -260,7 +320,7 @@ export default function AnalyticsPage() {
                         <span className="text-faint w-4 text-right tabular-nums text-[11.5px]">{i + 1}</span>
                         <span className="text-ink">{p.name}</span>
                       </div>
-                      <span className="text-muted tabular-nums">{p.count} returns</span>
+                      <span className="text-muted tabular-nums">{p.count} · {formatMoney(p.value, currency)}</span>
                     </div>
                     <div className="ml-6 h-1.5 rounded-full bg-bg overflow-hidden">
                       <div className="h-full rounded-full transition-all duration-700"
@@ -281,12 +341,13 @@ export default function AnalyticsPage() {
                   <tr className="text-[11px] uppercase tracking-wider text-faint border-b border-divider">
                     <th className="text-left font-semibold py-2.5 px-5">Reason</th>
                     <th className="text-right font-semibold py-2.5">Count</th>
-                    <th className="text-right font-semibold py-2.5">Share</th>
+                    <th className="text-right font-semibold py-2.5">Value</th>
+                    <th className="text-right font-semibold py-2.5 pr-5">Share</th>
                   </tr>
                 </thead>
                 <tbody>
                   {topReasons.length === 0 ? (
-                    <tr><td colSpan={3} className="py-6 text-center text-muted">No data yet.</td></tr>
+                    <tr><td colSpan={4} className="py-6 text-center text-muted">No data yet.</td></tr>
                   ) : topReasons.map((r) => (
                     <tr key={r.name} className="border-b border-divider last:border-0">
                       <td className="py-3 px-5">
@@ -296,7 +357,8 @@ export default function AnalyticsPage() {
                         </span>
                       </td>
                       <td className="py-3 text-right tabular-nums text-ink">{r.count}</td>
-                      <td className="py-3 text-right tabular-nums text-muted">{r.pct}%</td>
+                      <td className="py-3 text-right tabular-nums text-ink">{formatMoney(r.value, currency)}</td>
+                      <td className="py-3 text-right tabular-nums text-muted pr-5">{r.pct}%</td>
                     </tr>
                   ))}
                 </tbody>
@@ -305,6 +367,32 @@ export default function AnalyticsPage() {
           </div>
         </Card>
       </div>
+
+      <Card title="Resolutions" subtitle={`Completed returns by resolution · ${periodLabel}`}>
+        {resolutions.length === 0 ? (
+          <div className="py-6 text-center text-muted text-[13px]">No completed returns in this period.</div>
+        ) : (
+          <div className="space-y-3">
+            <div className="h-2.5 rounded-full overflow-hidden flex bg-bg">
+              {resolutions.map((r) => (
+                <div key={r.type} style={{ width: `${(r.count / resolutionTotal) * 100}%`, background: RESOLUTION_META[r.type]?.color ?? '#8B8FA8' }} title={RESOLUTION_META[r.type]?.label ?? r.type} />
+              ))}
+            </div>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
+              {resolutions.map((r) => (
+                <div key={r.type} className="rounded-md border border-divider p-3">
+                  <div className="flex items-center gap-2 text-[12px] text-muted">
+                    <span className="w-2 h-2 rounded-sm" style={{ background: RESOLUTION_META[r.type]?.color ?? '#8B8FA8' }} />
+                    {RESOLUTION_META[r.type]?.label ?? r.type}
+                  </div>
+                  <div className="mt-1 text-[16px] font-semibold text-ink tabular-nums">{r.count}</div>
+                  <div className="text-[11.5px] text-muted tabular-nums">{formatMoney(r.amount, currency)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </Card>
     </div>
   );
 }

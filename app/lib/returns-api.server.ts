@@ -361,6 +361,36 @@ export async function closeShopifyReturn(
 }
 
 /**
+ * Cancels a Shopify Return (used when a TrackBack return expires) so it
+ * doesn't stay open forever in the merchant's Shopify Admin.
+ */
+export async function cancelShopifyReturn(
+  admin: AdminClient,
+  shopifyReturnId: string,
+): Promise<{ ok: boolean; userErrors: any[] }> {
+  const MUTATION = `#graphql
+    mutation ReturnCancel($id: ID!) {
+      returnCancel(id: $id) {
+        return { id status }
+        userErrors { field message }
+      }
+    }`;
+  try {
+    const resp = await admin.graphql(MUTATION, { variables: { id: shopifyReturnId } });
+    const json: any = await resp.json();
+    const errors = json?.data?.returnCancel?.userErrors ?? [];
+    if (errors.length > 0) {
+      console.error("[returns-api] returnCancel userErrors:", errors);
+      return { ok: false, userErrors: errors };
+    }
+    return { ok: true, userErrors: [] };
+  } catch (err) {
+    console.error("[returns-api] returnCancel threw:", err);
+    return { ok: false, userErrors: [{ message: String(err) }] };
+  }
+}
+
+/**
  * Declines a requested Shopify Return. Mirror of approveShopifyReturn for
  * the merchant's "Reject" action.
  */

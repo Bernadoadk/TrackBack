@@ -5,10 +5,11 @@ import { AppProvider } from "@shopify/shopify-app-react-router/react";
 
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { syncBillingFromShopify } from "../lib/plan.server";
+import { countReturnsThisMonth, ensureBillingSynced } from "../lib/plan.server";
+import { planLimit } from "../lib/plans";
 import { getOnboardingState } from "../lib/onboarding.server";
+import { runShopMaintenance } from "../lib/returns-service.server";
 import { Sidebar, ToastProvider, Icon } from "../components/ui";
-import { useEffect, useState } from "react";
 import SupportChatWidget from "../components/SupportChatWidget";
 import ThemeToggle from "../components/ThemeToggle";
 
@@ -26,27 +27,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const shop = session.shop;
 
   // Onboarding gate — block all /app/* routes until the merchant has either
-  // completed setup or explicitly skipped. The wizard route opts out.
-  // We DON'T gate /app/settings either, so a merchant who skipped can still
-  // go fix things from the standard settings page.
+  // completed setup or explicitly skipped. Onboarding, settings and billing
+  // stay reachable so the merchant can always fix things or upgrade.
   const url = new URL(request.url);
-  const isOnOnboarding = url.pathname.startsWith('/app/onboarding');
-  const isOnSettings = url.pathname.startsWith('/app/settings');
+  const openPaths = ['/app/onboarding', '/app/settings', '/app/billing'];
   const onboarding = await getOnboardingState(shop);
-  if (!isOnOnboarding && !isOnSettings && onboarding.status === 'pending') {
+  if (!openPaths.some((p) => url.pathname.startsWith(p)) && onboarding.status === 'pending') {
     // Preserve Shopify embedded-auth params (shop, host, id_token, embedded…)
-    // across the redirect — otherwise authenticate.admin() loses context on
-    // the next request and bounces to /auth/login.
     throw redirect(`/app/onboarding?${url.searchParams.toString()}`);
   }
 
-  // Sync with Shopify FIRST — this is the source of truth for the plan.
-  // Doing it here (in the top-level admin layout loader) means every admin
-  // navigation refreshes the cache, so the UI never gets stuck on a stale
-  // "pending" or wrongly-active state.
-  const planName = await syncBillingFromShopify(admin, shop);
+  // Shopify is the source of truth for the plan; the local copy is refreshed
+  // at most every 10 minutes (the billing page always forces a refresh).
+  const planName = await ensureBillingSynced(admin, shop);
 
-  const [pendingCount, shopData, unreadAgg] = await Promise.all([
+  // Daily maintenance fallback (expiry) when the cron isn't configured.
+  runShopMaintenance(shop, { admin }).catch((e) => console.error('[app] maintenance failed:', e));
+
+  const [pendingCount, shopData, unreadAgg, usedThisMonth] = await Promise.all([
     prisma.returnRequest.count({ where: { shop, status: 'PENDING' } }),
     admin.graphql(`#graphql
       query { shop { name } }
@@ -55,20 +53,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       where: { shop, type: 'CLIENT' },
       _sum: { unreadByMerchant: true },
     }),
+    countReturnsThisMonth(shop),
   ]);
   const unreadCount = unreadAgg._sum.unreadByMerchant ?? 0;
-
   const shopName: string = shopData?.data?.shop?.name ?? shop.replace('.myshopify.com', '');
-
-  const firstDayOfMonth = new Date();
-  firstDayOfMonth.setDate(1);
-  firstDayOfMonth.setHours(0, 0, 0, 0);
-  const usedThisMonth = await prisma.returnRequest.count({
-    where: { shop, createdAt: { gte: firstDayOfMonth } }
-  });
-
-  const PLAN_LIMITS: Record<string, number> = { free: 10, starter: 100, pro: 999999 };
-  const planLimit: number = PLAN_LIMITS[planName] ?? 10;
 
   return {
     apiKey: process.env.SHOPIFY_API_KEY || "",
@@ -78,7 +66,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     shopName,
     planName,
     usedThisMonth,
-    planLimit,
+    planLimit: planLimit(planName),
     onboardingStatus: onboarding.status,
     onboardingMissing: onboarding.missingFields,
   };
@@ -90,9 +78,17 @@ export default function App() {
   const isLoading = navigation.state === "loading" || navigation.state === "submitting";
 
   return (
-    <AppProvider embedded apiKey={apiKey}>
-      <s-app-nav style={{ display: 'none' }}>
+    <AppProvider apiKey={apiKey}>
+      {/* Shopify admin navigation (left menu under the app name) */}
+      <s-app-nav>
         <s-link href="/app">Home</s-link>
+        <s-link href="/app/returns">Returns</s-link>
+        <s-link href="/app/messages">Messages</s-link>
+        <s-link href="/app/analytics">Analytics</s-link>
+        <s-link href="/app/portal-editor">Portal Editor</s-link>
+        <s-link href="/app/email-templates">Email Templates</s-link>
+        <s-link href="/app/settings">Settings</s-link>
+        <s-link href="/app/billing">Billing</s-link>
       </s-app-nav>
       <ToastProvider>
         {/* Global Loading Bar — gradient + glow */}

@@ -15,6 +15,14 @@ export default async function handleRequest(
   reactRouterContext: EntryContext
 ) {
   addDocumentResponseHeaders(request, responseHeaders);
+  // The customer portal is public and is embedded by the storefront (app
+  // proxy iframe, merchant iframe snippets, custom domains): allow any HTTPS
+  // parent instead of the admin-only frame-ancestors set above.
+  const pathname = new URL(request.url).pathname;
+  if (pathname === "/portal") {
+    responseHeaders.set("Content-Security-Policy", "frame-ancestors https: http://localhost:*;");
+    responseHeaders.delete("Link");
+  }
   const userAgent = request.headers.get("user-agent");
   const callbackName = isbot(userAgent ?? '')
     ? "onAllReady"

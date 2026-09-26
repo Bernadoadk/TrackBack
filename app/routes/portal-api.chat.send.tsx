@@ -1,89 +1,71 @@
+// POST /portal-api/chat/send — customer message (signed chat token required).
 import type { ActionFunctionArgs } from "react-router";
 import prisma from "../db.server";
-import { authenticate } from "../shopify.server";
+import { sendChatEmail } from "../lib/chat-mailer.server";
 import {
+  claimOfflineEmailSlot,
   getOrCreateClientConversation,
   isMerchantOffline,
   previewOf,
-  shouldSendOfflineEmail,
 } from "../lib/chat.server";
-import { sendChatEmail } from "../lib/chat-mailer.server";
+import { handlePortalApi } from "../lib/portal-api.server";
+import { hasFeature } from "../lib/plans";
+import { rateLimit } from "../lib/rate-limit.server";
+import { verifyChatToken } from "../lib/tokens.server";
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  if (request.method !== "POST") {
-    return Response.json({ error: "Method not allowed" }, { status: 405 });
-  }
+export const action = ({ request }: ActionFunctionArgs) =>
+  handlePortalApi(
+    request,
+    "chat-send",
+    async ({ shop, settings, plan, body }) => {
+      if (!settings.liveChatEnabled || !hasFeature(plan, "liveChat")) return { error: "errUnavailable" };
+      const token = verifyChatToken(String(body.token ?? ""));
+      if (!token || token.shop !== shop) return { error: "errSession" };
 
-  let shop = "";
-  try {
-    const auth = await authenticate.public.appProxy(request);
-    if (auth?.session) shop = auth.session.shop;
-  } catch {
-    // fall through to body shop
-  }
+      const text = String(body.body ?? "").trim();
+      if (!text || text.length > 4000) return { error: "chatError" };
+      const name = body.name ? String(body.name).trim().slice(0, 80) : undefined;
 
-  const body = await request.json().catch(() => ({}));
-  if (!shop) shop = String(body.shop || "").trim();
-  if (!shop) return Response.json({ error: "Missing shop" }, { status: 400 });
+      if (!(await rateLimit(`chat:${shop}:${token.email}`, 20, 600))) return { error: "errTooMany" };
 
-  const email = String(body.email || "").trim().toLowerCase();
-  const name = body.name ? String(body.name).trim() : undefined;
-  const text = String(body.body || "").trim();
+      const conversation = await getOrCreateClientConversation({ shop, customerEmail: token.email, customerName: name });
+      const message = await prisma.chatMessage.create({
+        data: {
+          conversationId: conversation.id,
+          senderType: "CLIENT",
+          senderName: name ?? token.email.split("@")[0],
+          body: text,
+        },
+      });
+      await prisma.conversation.update({
+        where: { id: conversation.id },
+        data: {
+          lastMessageAt: message.createdAt,
+          lastMessagePreview: previewOf(text),
+          unreadByMerchant: { increment: 1 },
+        },
+      });
 
-  if (!email || !email.includes("@")) {
-    return Response.json({ error: "Invalid email" }, { status: 400 });
-  }
-  if (!text) {
-    return Response.json({ error: "Empty message" }, { status: 400 });
-  }
-  if (text.length > 4000) {
-    return Response.json({ error: "Message too long" }, { status: 400 });
-  }
+      if ((await isMerchantOffline(shop)) && (await claimOfflineEmailSlot(conversation.id))) {
+        await sendChatEmail({
+          shop,
+          customerName: name ?? token.email.split("@")[0],
+          customerEmail: token.email,
+          bodyPreview: previewOf(text),
+        }).catch((e) => console.error("[chat] email notify failed:", e));
+      }
 
-  const conversation = await getOrCreateClientConversation({
-    shop,
-    customerEmail: email,
-    customerName: name,
-  });
-
-  const message = await prisma.chatMessage.create({
-    data: {
-      conversationId: conversation.id,
-      senderType: "CLIENT",
-      senderName: name ?? email.split("@")[0],
-      body: text,
+      return {
+        ok: true,
+        conversationId: conversation.id,
+        message: {
+          id: message.id,
+          senderType: message.senderType,
+          senderName: message.senderName,
+          body: message.body,
+          createdAt: message.createdAt.toISOString(),
+        },
+      };
     },
-  });
-
-  await prisma.conversation.update({
-    where: { id: conversation.id },
-    data: {
-      lastMessageAt: message.createdAt,
-      lastMessagePreview: previewOf(text),
-      unreadByMerchant: { increment: 1 },
-    },
-  });
-
-  // Notify merchant by email if they appear offline
-  if (isMerchantOffline(shop) && shouldSendOfflineEmail(shop, conversation.id)) {
-    sendChatEmail({
-      shop,
-      to: shop, // merchant email is fetched server-side from settings
-      customerName: name ?? email.split("@")[0],
-      customerEmail: email,
-      bodyPreview: previewOf(text),
-    }).catch((e) => console.error("[chat] email notify failed:", e));
-  }
-
-  return Response.json({
-    ok: true,
-    conversationId: conversation.id,
-    message: {
-      id: message.id,
-      senderType: message.senderType,
-      senderName: message.senderName,
-      body: message.body,
-      createdAt: message.createdAt.toISOString(),
-    },
-  });
-};
+    { limit: 40, windowSeconds: 600 },
+  );

@@ -9,7 +9,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
-  markMerchantActive(shop);
+  await markMerchantActive(shop);
 
   const body = await request.json().catch(() => ({}));
   const conversationId = String(body.conversationId || "");

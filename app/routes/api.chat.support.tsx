@@ -9,7 +9,7 @@ import {
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
   const shop = session.shop;
-  markMerchantActive(shop);
+  await markMerchantActive(shop);
 
   // Try to grab a friendly shop name
   let shopName: string | undefined;
