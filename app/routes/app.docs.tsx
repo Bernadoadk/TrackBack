@@ -684,7 +684,7 @@ Authorization: Bearer tb_live_…`}</CodeBlock>
                 style={{ background: 'linear-gradient(135deg,#6C63FF,#8B5CF6)' }}>
                 <Icon name="Mail" size={13} /> Email support
               </a>
-              <a href="https://return-flow-web.vercel.app/changelog.html" target="_blank" rel="noreferrer"
+              <a href="https://trackback-web.vercel.app/changelog" target="_blank" rel="noreferrer"
                 className="inline-flex items-center gap-1.5 px-3.5 h-9 rounded-md text-[12.5px] font-semibold text-ink bg-bg/40 border border-border hover:border-accent2 transition">
                 <Icon name="Sparkles" size={13} /> Changelog
               </a>

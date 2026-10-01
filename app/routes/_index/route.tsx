@@ -17,6 +17,9 @@ export const meta: MetaFunction = () => [
     name: "description",
     content: "Branded return portal, exchanges, store credit, cash-on-delivery refunds and WhatsApp updates — at a price small stores can afford.",
   },
+  // The marketing site (trackback-web.vercel.app) is the page that should rank for
+  // "TrackBack": keep this app login page out of search results.
+  { name: "robots", content: "noindex, follow" },
 ];
 
 const FEATURES = [
